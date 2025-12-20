@@ -2,89 +2,18 @@
 Обработчики главного меню бота
 """
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command
-
-from apps.bot.keyboards import get_main_menu_keyboard, get_webapp_keyboard
+from aiogram.types import Message
 
 router = Router()
 
 
-@router.message(F.text == "🛍 Открыть магазин")
-async def open_shop(message: Message):
-    """Открыть WebApp магазина"""
-    await message.answer(
-        "🎮 <b>Магазин игровых ключей</b>\n\n"
-        "Нажмите кнопку ниже чтобы открыть каталог:",
-        reply_markup=get_webapp_keyboard()
-    )
+@router.message(F.text == "Привет")
+async def hello(message: Message):
+    """Ответ на Привет"""
+    await message.answer(f"Привет, {message.from_user.first_name}! 👋")
 
 
-@router.message(F.text == "📦 Мои заказы")
-async def my_orders(message: Message):
-    """Показать заказы пользователя"""
-    # TODO: Получить заказы из API
-    await message.answer(
-        "📦 <b>Ваши заказы</b>\n\n"
-        "У вас пока нет заказов.\n"
-        "Оформите первый заказ в магазине! 🛍"
-    )
-
-
-@router.message(F.text == "💰 Баланс")
-async def balance(message: Message):
-    """Показать баланс пользователя"""
-    # TODO: Получить баланс из API
-    await message.answer(
-        "💰 <b>Ваш баланс</b>\n\n"
-        "Текущий баланс: <b>0 ₽</b>\n\n"
-        "<i>Функционал пополнения баланса будет добавлен позже.</i>"
-    )
-
-
-@router.message(F.text == "ℹ️ Помощь")
-async def help_command(message: Message):
-    """Показать помощь"""
-    help_text = """
-ℹ️ <b>Помощь</b>
-
-<b>Как сделать заказ:</b>
-1. Нажмите "🛍 Открыть магазин"
-2. Выберите нужную игру
-3. Добавьте в корзину
-4. Оформите заказ
-5. Оплатите удобным способом
-
-<b>Способы оплаты:</b>
-• ⭐️ Telegram Stars
-• 💳 Банковская карта (ЮKassa)
-
-<b>Получение ключей:</b>
-После оплаты ключ придет вам в личные сообщения.
-
-<b>Возврат:</b>
-Возврат возможен в течение 24 часов, если ключ не был активирован.
-"""
-    await message.answer(help_text)
-
-
-@router.message(F.text == "📞 Поддержка")
-async def support(message: Message):
-    """Связаться с поддержкой"""
-    await message.answer(
-        "📞 <b>Поддержка</b>\n\n"
-        "Если у вас возникли вопросы или проблемы:\n\n"
-        "📧 Email: support@noonyashop.ru\n"
-        "💬 Telegram: @support_username\n\n"
-        "Мы отвечаем в течение 24 часов."
-    )
-
-
-@router.message(Command("menu"))
-async def show_menu(message: Message):
-    """Показать главное меню"""
-    await message.answer(
-        "📱 <b>Главное меню</b>\n\n"
-        "Выберите действие:",
-        reply_markup=get_main_menu_keyboard()
-    )
+@router.message(F.text == "Как дела?")
+async def how_are_you(message: Message):
+    """Ответ на Как дела?"""
+    await message.answer("Отлично! Спасибо, что спросили! 😊")
