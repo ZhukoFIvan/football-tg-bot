@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from core.config import settings
 
 # Импорт хендлеров
-from apps.bot.handlers import start
+from apps.bot.handlers import start, menu, orders, admin
 
 # Настройка логирования
 logging.basicConfig(
@@ -29,6 +29,9 @@ async def main():
 
     # Регистрация роутеров
     dp.include_router(start.router)
+    dp.include_router(menu.router)
+    dp.include_router(orders.router)
+    dp.include_router(admin.router)
 
     logger.info("🤖 Bot starting...")
     logger.info(f"👤 Owner IDs: {settings.owner_ids}")
