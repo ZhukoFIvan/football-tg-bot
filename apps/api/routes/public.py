@@ -16,10 +16,10 @@ router = APIRouter()
 # Pydantic схемы для ответов
 class SectionResponse(BaseModel):
     id: int
-    title: str
-    slug: str
-    sort_order: int
-    is_active: bool
+    name: str
+    image: Optional[str] = None
+    route: Optional[str] = None
+    rest_time: Optional[int] = None  # время до окончания акции в секундах
 
     class Config:
         from_attributes = True

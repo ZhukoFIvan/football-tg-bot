@@ -21,17 +21,17 @@ router = APIRouter()
 # ==================== PYDANTIC SCHEMAS ====================
 
 class SectionCreate(BaseModel):
-    title: str
-    slug: str
-    description: Optional[str] = None
+    name: str
+    route: Optional[str] = None
+    rest_time: Optional[int] = None  # время до окончания акции в секундах
     sort_order: int = 0
     is_active: bool = True
 
 
 class SectionUpdate(BaseModel):
-    title: Optional[str] = None
-    slug: Optional[str] = None
-    description: Optional[str] = None
+    name: Optional[str] = None
+    route: Optional[str] = None
+    rest_time: Optional[int] = None
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
 
@@ -177,25 +177,23 @@ async def admin_delete_section(
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
 
-    # Удалить связанные изображения
-    if section.background_image:
-        delete_file(section.background_image)
-    if section.icon_image:
-        delete_file(section.icon_image)
+    # Удалить связанное изображение
+    if section.image:
+        delete_file(section.image)
 
     await db.delete(section)
     await db.commit()
     return {"ok": True, "message": "Section deleted"}
 
 
-@router.post("/sections/{section_id}/background")
-async def admin_upload_section_background(
+@router.post("/sections/{section_id}/image")
+async def admin_upload_section_image(
     section_id: int,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(get_admin_user)
 ):
-    """Загрузить фоновое изображение для раздела"""
+    """Загрузить изображение для секции"""
     result = await db.execute(
         select(Section).where(Section.id == section_id)
     )
@@ -205,41 +203,12 @@ async def admin_upload_section_background(
         raise HTTPException(status_code=404, detail="Section not found")
 
     # Удалить старое изображение
-    if section.background_image:
-        delete_file(section.background_image)
+    if section.image:
+        delete_file(section.image)
 
     # Сохранить новое
     file_path = await save_upload_file(file, subfolder="sections")
-    section.background_image = file_path
-
-    await db.commit()
-    await db.refresh(section)
-    return {"ok": True, "path": file_path}
-
-
-@router.post("/sections/{section_id}/icon")
-async def admin_upload_section_icon(
-    section_id: int,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_admin_user)
-):
-    """Загрузить иконку для раздела"""
-    result = await db.execute(
-        select(Section).where(Section.id == section_id)
-    )
-    section = result.scalar_one_or_none()
-
-    if not section:
-        raise HTTPException(status_code=404, detail="Section not found")
-
-    # Удалить старое изображение
-    if section.icon_image:
-        delete_file(section.icon_image)
-
-    # Сохранить новое
-    file_path = await save_upload_file(file, subfolder="sections")
-    section.icon_image = file_path
+    section.image = file_path
 
     await db.commit()
     await db.refresh(section)

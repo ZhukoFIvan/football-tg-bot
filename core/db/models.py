@@ -41,16 +41,16 @@ class User(Base):
 
 
 class Section(Base):
-    """Разделы каталога (верхний уровень)"""
+    """Разделы каталога (верхний уровень) - максимум 3 секции"""
     __tablename__ = "sections"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String(255), nullable=False)
-    slug = Column(String(255), unique=True, nullable=False, index=True)
-    description = Column(Text, nullable=True)
-    # URL фонового изображения
-    background_image = Column(String(500), nullable=True)
-    icon_image = Column(String(500), nullable=True)  # URL иконки/оформления
+    name = Column(String(255), nullable=False)  # Название секции
+    image = Column(String(500), nullable=True)  # URL изображения секции
+    # Роут для браузера (например: "sale", "new", "popular")
+    route = Column(String(255), nullable=True)
+    # Время до окончания акции в секундах (опционально)
+    rest_time = Column(Integer, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -34,8 +34,8 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Подключение роутеров
 app.include_router(health.router, tags=["Health"])
-app.include_router(public.router, prefix="/public", tags=["Public"])
-app.include_router(public_banners.router, prefix="/public", tags=["Public"])
+app.include_router(public.router, tags=["Catalog"])
+app.include_router(public_banners.router, tags=["Banners & Badges"])
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(cart.router, prefix="/cart", tags=["Cart"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
