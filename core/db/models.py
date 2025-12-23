@@ -10,14 +10,8 @@ from sqlalchemy.orm import relationship
 from core.db.base import Base
 
 
-# Many-to-Many таблица для связи товаров и бейджей
-product_badges = Table(
-    'product_badges',
-    Base.metadata,
-    Column('product_id', Integer, ForeignKey(
-        'products.id', ondelete='CASCADE')),
-    Column('badge_id', Integer, ForeignKey('badges.id', ondelete='CASCADE'))
-)
+# Удалена many-to-many таблица product_badges
+# Теперь у товара только один бейдж через badge_id
 
 
 class User(Base):
@@ -35,9 +29,18 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow,
                         onupdate=datetime.utcnow, nullable=False)
 
+    bonus_balance = Column(
+        Integer, default=0, nullable=False)  # Бонусный баланс
+    total_spent = Column(Numeric(10, 2), default=0,
+                         nullable=False)  # Всего потрачено
+    # Количество заказов
+    total_orders = Column(Integer, default=0, nullable=False)
+
     # Relationships
     orders = relationship("Order", back_populates="user")
     cart = relationship("Cart", back_populates="user", uselist=False)
+    bonus_transactions = relationship(
+        "BonusTransaction", back_populates="user", cascade="all, delete-orphan")
 
 
 class Section(Base):
@@ -49,34 +52,29 @@ class Section(Base):
     image = Column(String(500), nullable=True)  # URL изображения секции
     # Роут для браузера (например: "sale", "new", "popular")
     route = Column(String(255), nullable=True)
-    # Время до окончания акции в секундах (опционально)
-    rest_time = Column(Integer, nullable=True)
+    # Дата и время окончания акции (UTC)
+    end_time = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    # Relationships
-    categories = relationship(
-        "Category", back_populates="section", cascade="all, delete-orphan")
 
 
 class Category(Base):
-    """Категории внутри разделов"""
+    """Категории - независимые от секций"""
     __tablename__ = "categories"
 
     id = Column(Integer, primary_key=True, index=True)
-    section_id = Column(Integer, ForeignKey(
-        "sections.id", ondelete="CASCADE"), nullable=False)
     title = Column(String(255), nullable=False)
     slug = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    image = Column(String(500), nullable=True)  # URL изображения категории
+    main_image = Column(String(500), nullable=True)  # Основное изображение
+    # Дополнительное изображение
+    additional_image = Column(String(500), nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Relationships
-    section = relationship("Section", back_populates="categories")
     products = relationship(
         "Product", back_populates="category", cascade="all, delete-orphan")
 
@@ -88,13 +86,21 @@ class Product(Base):
     id = Column(Integer, primary_key=True, index=True)
     category_id = Column(Integer, ForeignKey(
         "categories.id", ondelete="CASCADE"), nullable=False)
+    section_id = Column(Integer, ForeignKey(
+        # Связь с секцией (опционально)
+        "sections.id", ondelete="SET NULL"), nullable=True)
+    badge_id = Column(Integer, ForeignKey(
+        "badges.id", ondelete="SET NULL"), nullable=True)  # Один бейдж
     title = Column(String(500), nullable=False)
     slug = Column(String(500), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    image = Column(String(500), nullable=True)  # URL изображения товара
+    # JSON массив URL изображений ["url1", "url2"]
+    images = Column(Text, nullable=True)
     price = Column(Numeric(10, 2), nullable=False)
     # Старая цена для отображения скидки
     old_price = Column(Numeric(10, 2), nullable=True)
+    # Текст акции (например "Скидка 50%", "2 по цене 1")
+    promotion_text = Column(String(200), nullable=True)
     currency = Column(String(10), default="RUB", nullable=False)
     stock_count = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
@@ -104,8 +110,8 @@ class Product(Base):
 
     # Relationships
     category = relationship("Category", back_populates="products")
-    badges = relationship("Badge", secondary=product_badges,
-                          back_populates="products")
+    section = relationship("Section")
+    badge = relationship("Badge")
 
 
 class Badge(Base):
@@ -120,10 +126,6 @@ class Badge(Base):
                         nullable=False)  # Цвет текста
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    # Relationships
-    products = relationship(
-        "Product", secondary=product_badges, back_populates="badges")
 
 
 class Banner(Base):
@@ -216,3 +218,24 @@ class OrderItem(Base):
     # Relationships
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
+
+
+class BonusTransaction(Base):
+    """История начисления и списания бонусов"""
+    __tablename__ = "bonus_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey(
+        "users.id", ondelete="CASCADE"), nullable=False)
+    order_id = Column(Integer, ForeignKey(
+        "orders.id", ondelete="SET NULL"), nullable=True)
+    # Положительное = начисление, отрицательное = списание
+    amount = Column(Integer, nullable=False)
+    # earned, spent, bonus_gift, refund
+    type = Column(String(50), nullable=False)
+    description = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="bonus_transactions")
+    order = relationship("Order")

@@ -12,6 +12,7 @@ from decimal import Decimal
 from core.db.session import get_db
 from core.db.models import Cart, CartItem, Product, User
 from core.dependencies import get_current_user
+from core.bonus import BonusSystem
 
 router = APIRouter()
 
@@ -39,6 +40,9 @@ class CartResponse(BaseModel):
     items: List[CartItemResponse]
     total_items: int  # Общее количество товаров
     total_amount: Decimal  # Общая сумма
+    bonus_balance: int  # Доступные бонусы пользователя
+    max_bonus_usage: int  # Максимум бонусов можно использовать
+    bonus_will_earn: int  # Сколько бонусов будет начислено
 
 
 class AddToCartRequest(BaseModel):
@@ -72,7 +76,7 @@ async def get_or_create_cart(user: User, db: AsyncSession) -> Cart:
     return cart
 
 
-def format_cart_response(cart: Cart) -> CartResponse:
+async def format_cart_response(cart: Cart, user: User) -> CartResponse:
     """Форматировать ответ с корзиной"""
     items = []
     total_items = 0
@@ -98,11 +102,18 @@ def format_cart_response(cart: Cart) -> CartResponse:
             subtotal=subtotal
         ))
 
+    # Рассчитать бонусы
+    max_bonus_usage = await BonusSystem.calculate_max_bonus_usage(total_amount)
+    bonus_will_earn = await BonusSystem.calculate_earned_bonuses(total_amount, user)
+
     return CartResponse(
         id=cart.id,
         items=items,
         total_items=total_items,
-        total_amount=total_amount
+        total_amount=total_amount,
+        bonus_balance=user.bonus_balance,
+        max_bonus_usage=max_bonus_usage,
+        bonus_will_earn=bonus_will_earn
     )
 
 
@@ -117,7 +128,7 @@ async def get_cart(
     Получить корзину текущего пользователя
     """
     cart = await get_or_create_cart(current_user, db)
-    return format_cart_response(cart)
+    return await format_cart_response(cart, current_user)
 
 
 @router.post("/items", response_model=CartResponse)
@@ -179,7 +190,7 @@ async def add_to_cart(
     )
     cart = result.scalar_one()
 
-    return format_cart_response(cart)
+    return await format_cart_response(cart, current_user)
 
 
 @router.patch("/items/{item_id}", response_model=CartResponse)
@@ -221,7 +232,7 @@ async def update_cart_item(
     )
     cart = result.scalar_one()
 
-    return format_cart_response(cart)
+    return await format_cart_response(cart, current_user)
 
 
 @router.delete("/items/{item_id}", response_model=CartResponse)
@@ -258,7 +269,7 @@ async def remove_from_cart(
     )
     cart = result.scalar_one()
 
-    return format_cart_response(cart)
+    return await format_cart_response(cart, current_user)
 
 
 @router.delete("/", response_model=dict)

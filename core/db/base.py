@@ -14,5 +14,5 @@ def import_models():
     """Импорт всех моделей для Alembic"""
     from core.db.models import (  # noqa
         User, Section, Category, Product, Badge, Banner,
-        Cart, CartItem, Order, OrderItem, product_badges
+        Cart, CartItem, Order, OrderItem, BonusTransaction
     )

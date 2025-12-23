@@ -1,7 +1,7 @@
 """Update sections structure
 
-Revision ID: 004_update_sections
-Revises: 002
+Revision ID: 004
+Revises: 003
 Create Date: 2025-12-20
 """
 from alembic import op
@@ -9,8 +9,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '004_update_sections'
-down_revision = '002'
+revision = '004'
+down_revision = '003'
 branch_label = None
 depends_on = None
 

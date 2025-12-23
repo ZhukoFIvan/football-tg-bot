@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from core.db.session import get_db
 from core.db.models import User
 from core.auth import verify_telegram_webapp_data, create_jwt_token
+from core.config import settings
 
 router = APIRouter()
 
@@ -21,9 +22,62 @@ class TelegramAuthRequest(BaseModel):
 class AuthResponse(BaseModel):
     """Ответ с JWT токеном"""
     ok: bool
-    token: str
+    access_token: str
     user_id: int
     telegram_id: int
+    is_admin: bool  # Флаг администратора
+
+
+class DevAuthRequest(BaseModel):
+    """Запрос на получение dev токена"""
+    telegram_id: int
+
+
+@router.post("/dev-token", response_model=AuthResponse)
+async def dev_token(
+    request: DevAuthRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    🔧 DEV ONLY: Получить токен для разработки без Telegram WebApp
+
+    Используйте telegram_id из OWNER_TG_IDS для получения админ-токена
+    """
+    if not settings.DEBUG:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    telegram_id = request.telegram_id
+
+    # Ищем или создаем пользователя
+    result = await db.execute(
+        select(User).where(User.telegram_id == telegram_id)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        # Создаем тестового пользователя
+        is_admin = telegram_id in settings.owner_ids
+        user = User(
+            telegram_id=telegram_id,
+            username=f"test_user_{telegram_id}",
+            first_name="Test",
+            last_name="User",
+            is_admin=is_admin
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+    # Генерируем JWT токен
+    token = create_jwt_token(telegram_id=user.telegram_id, user_id=user.id)
+
+    return AuthResponse(
+        ok=True,
+        access_token=token,
+        user_id=user.id,
+        telegram_id=user.telegram_id,
+        is_admin=user.is_admin
+    )
 
 
 @router.post("/telegram", response_model=AuthResponse)
@@ -81,7 +135,8 @@ async def telegram_auth(
 
     return AuthResponse(
         ok=True,
-        token=token,
+        access_token=token,
         user_id=user.id,
-        telegram_id=user.telegram_id
+        telegram_id=user.telegram_id,
+        is_admin=user.is_admin
     )

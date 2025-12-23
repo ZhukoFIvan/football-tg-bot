@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from pydantic import BaseModel
 from decimal import Decimal
+import json
 
 from core.db.session import get_db
 from core.db.models import (
@@ -23,7 +24,8 @@ router = APIRouter()
 class SectionCreate(BaseModel):
     name: str
     route: Optional[str] = None
-    rest_time: Optional[int] = None  # время до окончания акции в секундах
+    # время до окончания в секундах (конвертируется в end_time)
+    rest_time: Optional[int] = None
     sort_order: int = 0
     is_active: bool = True
 
@@ -31,13 +33,13 @@ class SectionCreate(BaseModel):
 class SectionUpdate(BaseModel):
     name: Optional[str] = None
     route: Optional[str] = None
+    # время до окончания в секундах (конвертируется в end_time)
     rest_time: Optional[int] = None
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
 
 
 class CategoryCreate(BaseModel):
-    section_id: int
     title: str
     slug: str
     description: Optional[str] = None
@@ -46,7 +48,6 @@ class CategoryCreate(BaseModel):
 
 
 class CategoryUpdate(BaseModel):
-    section_id: Optional[int] = None
     title: Optional[str] = None
     slug: Optional[str] = None
     description: Optional[str] = None
@@ -56,28 +57,32 @@ class CategoryUpdate(BaseModel):
 
 class ProductCreate(BaseModel):
     category_id: int
+    section_id: Optional[int] = None
+    badge_id: Optional[int] = None  # Один бейдж
     title: str
     slug: str
     description: Optional[str] = None
     price: Decimal
     old_price: Optional[Decimal] = None
+    promotion_text: Optional[str] = None  # Текст акции (например "Скидка 50%")
     currency: str = "RUB"
     stock_count: int = 0
     is_active: bool = True
-    badge_ids: List[int] = []
 
 
 class ProductUpdate(BaseModel):
     category_id: Optional[int] = None
+    section_id: Optional[int] = None
+    badge_id: Optional[int] = None  # Один бейдж
     title: Optional[str] = None
     slug: Optional[str] = None
     description: Optional[str] = None
     price: Optional[Decimal] = None
     old_price: Optional[Decimal] = None
+    promotion_text: Optional[str] = None  # Текст акции
     currency: Optional[str] = None
     stock_count: Optional[int] = None
     is_active: Optional[bool] = None
-    badge_ids: Optional[List[int]] = None
 
 
 class BadgeCreate(BaseModel):
@@ -131,7 +136,17 @@ async def admin_create_section(
     admin: User = Depends(get_admin_user)
 ):
     """Создать новый раздел"""
-    section = Section(**data.model_dump())
+    from datetime import datetime, timedelta
+
+    section_data = data.model_dump()
+
+    # Конвертировать rest_time в end_time
+    if section_data.get('rest_time'):
+        section_data['end_time'] = datetime.utcnow(
+        ) + timedelta(seconds=section_data['rest_time'])
+        del section_data['rest_time']
+
+    section = Section(**section_data)
     db.add(section)
     await db.commit()
     await db.refresh(section)
@@ -146,6 +161,8 @@ async def admin_update_section(
     admin: User = Depends(get_admin_user)
 ):
     """Обновить раздел"""
+    from datetime import datetime, timedelta
+
     result = await db.execute(
         select(Section).where(Section.id == section_id)
     )
@@ -154,7 +171,18 @@ async def admin_update_section(
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    update_data = data.model_dump(exclude_unset=True)
+
+    # Конвертировать rest_time в end_time
+    if 'rest_time' in update_data:
+        if update_data['rest_time'] is not None:
+            update_data['end_time'] = datetime.utcnow(
+            ) + timedelta(seconds=update_data['rest_time'])
+        else:
+            update_data['end_time'] = None
+        del update_data['rest_time']
+
+    for key, value in update_data.items():
         setattr(section, key, value)
 
     await db.commit()
@@ -297,14 +325,14 @@ async def admin_delete_category(
     return {"ok": True, "message": "Category deleted"}
 
 
-@router.post("/categories/{category_id}/image")
-async def admin_upload_category_image(
+@router.post("/categories/{category_id}/main-image")
+async def admin_upload_category_main_image(
     category_id: int,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(get_admin_user)
 ):
-    """Загрузить изображение для категории"""
+    """Загрузить основное изображение для категории"""
     result = await db.execute(
         select(Category).where(Category.id == category_id)
     )
@@ -314,12 +342,41 @@ async def admin_upload_category_image(
         raise HTTPException(status_code=404, detail="Category not found")
 
     # Удалить старое изображение
-    if category.image:
-        delete_file(category.image)
+    if category.main_image:
+        delete_file(category.main_image)
 
     # Сохранить новое
     file_path = await save_upload_file(file, subfolder="categories")
-    category.image = file_path
+    category.main_image = file_path
+
+    await db.commit()
+    await db.refresh(category)
+    return {"ok": True, "path": file_path}
+
+
+@router.post("/categories/{category_id}/additional-image")
+async def admin_upload_category_additional_image(
+    category_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    """Загрузить дополнительное изображение для категории"""
+    result = await db.execute(
+        select(Category).where(Category.id == category_id)
+    )
+    category = result.scalar_one_or_none()
+
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    # Удалить старое изображение
+    if category.additional_image:
+        delete_file(category.additional_image)
+
+    # Сохранить новое
+    file_path = await save_upload_file(file, subfolder="categories")
+    category.additional_image = file_path
 
     await db.commit()
     await db.refresh(category)
@@ -355,19 +412,8 @@ async def admin_create_product(
     admin: User = Depends(get_admin_user)
 ):
     """Создать новый товар"""
-    # Извлечь badge_ids
-    badge_ids = data.badge_ids
-    product_data = data.model_dump(exclude={"badge_ids"})
-
-    product = Product(**product_data)
-
-    # Добавить бейджи если указаны
-    if badge_ids:
-        result = await db.execute(
-            select(Badge).where(Badge.id.in_(badge_ids))
-        )
-        badges = result.scalars().all()
-        product.badges = list(badges)
+    product = Product(**data.model_dump())
+    product.images = "[]"  # Пустой массив изображений
 
     db.add(product)
     await db.commit()
@@ -391,18 +437,8 @@ async def admin_update_product(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Обновить бейджи если указаны
+    # Обновить поля
     update_data = data.model_dump(exclude_unset=True)
-    badge_ids = update_data.pop("badge_ids", None)
-
-    if badge_ids is not None:
-        result = await db.execute(
-            select(Badge).where(Badge.id.in_(badge_ids))
-        )
-        badges = result.scalars().all()
-        product.badges = list(badges)
-
-    # Обновить остальные поля
     for key, value in update_data.items():
         setattr(product, key, value)
 
@@ -435,14 +471,16 @@ async def admin_delete_product(
     return {"ok": True, "message": "Product deleted"}
 
 
-@router.post("/products/{product_id}/image")
-async def admin_upload_product_image(
+@router.post("/products/{product_id}/images")
+async def admin_upload_product_images(
     product_id: int,
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(get_admin_user)
 ):
-    """Загрузить изображение для товара"""
+    """Загрузить изображения для товара (множественная загрузка)"""
+    import json
+
     result = await db.execute(
         select(Product).where(Product.id == product_id)
     )
@@ -451,17 +489,69 @@ async def admin_upload_product_image(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Удалить старое изображение
-    if product.image:
-        delete_file(product.image)
+    # Получить текущие изображения
+    current_images = []
+    if product.images:
+        try:
+            current_images = json.loads(product.images)
+        except:
+            current_images = []
 
-    # Сохранить новое
-    file_path = await save_upload_file(file, subfolder="products")
-    product.image = file_path
+    # Сохранить новые изображения
+    new_images = []
+    for file in files:
+        file_path = await save_upload_file(file, subfolder="products")
+        new_images.append(file_path)
+
+    # Добавить к существующим
+    all_images = current_images + new_images
+    product.images = json.dumps(all_images)
 
     await db.commit()
     await db.refresh(product)
-    return {"ok": True, "path": file_path}
+    return {"ok": True, "images": all_images}
+
+
+@router.delete("/products/{product_id}/images/{image_index}")
+async def admin_delete_product_image(
+    product_id: int,
+    image_index: int,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    """Удалить изображение товара по индексу"""
+    import json
+
+    result = await db.execute(
+        select(Product).where(Product.id == product_id)
+    )
+    product = result.scalar_one_or_none()
+
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Получить текущие изображения
+    current_images = []
+    if product.images:
+        try:
+            current_images = json.loads(product.images)
+        except:
+            current_images = []
+
+    if image_index < 0 or image_index >= len(current_images):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    # Удалить файл
+    image_path = current_images[image_index]
+    delete_file(image_path)
+
+    # Удалить из массива
+    current_images.pop(image_index)
+    product.images = json.dumps(current_images)
+
+    await db.commit()
+    await db.refresh(product)
+    return {"ok": True, "images": current_images}
 
 
 # ==================== BADGES ====================
