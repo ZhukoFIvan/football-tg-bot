@@ -138,13 +138,13 @@ async def admin_create_section(
     """Создать новый раздел"""
     from datetime import datetime, timedelta
 
-    section_data = data.model_dump()
+    section_data = data.model_dump(exclude_unset=True)
 
     # Конвертировать rest_time в end_time
-    if section_data.get('rest_time'):
-        section_data['end_time'] = datetime.utcnow(
-        ) + timedelta(seconds=section_data['rest_time'])
-        del section_data['rest_time']
+    rest_time = section_data.pop('rest_time', None)
+    if rest_time:
+        section_data['end_time'] = datetime.utcnow() + \
+            timedelta(seconds=rest_time)
 
     section = Section(**section_data)
     db.add(section)
@@ -174,13 +174,13 @@ async def admin_update_section(
     update_data = data.model_dump(exclude_unset=True)
 
     # Конвертировать rest_time в end_time
-    if 'rest_time' in update_data:
-        if update_data['rest_time'] is not None:
-            update_data['end_time'] = datetime.utcnow(
-            ) + timedelta(seconds=update_data['rest_time'])
+    rest_time = update_data.pop('rest_time', None)
+    if rest_time is not None:
+        if rest_time > 0:
+            update_data['end_time'] = datetime.utcnow() + \
+                timedelta(seconds=rest_time)
         else:
             update_data['end_time'] = None
-        del update_data['rest_time']
 
     for key, value in update_data.items():
         setattr(section, key, value)
@@ -412,13 +412,19 @@ async def admin_create_product(
     admin: User = Depends(get_admin_user)
 ):
     """Создать новый товар"""
-    product = Product(**data.model_dump())
-    product.images = "[]"  # Пустой массив изображений
+    try:
+        product_data = data.model_dump()
+        product_data['images'] = "[]"  # Пустой массив изображений
 
-    db.add(product)
-    await db.commit()
-    await db.refresh(product)
-    return product
+        product = Product(**product_data)
+        db.add(product)
+        await db.commit()
+        await db.refresh(product)
+        return product
+    except Exception as e:
+        print(f"❌ Error creating product: {e}")
+        print(f"📦 Data received: {data.model_dump()}")
+        raise
 
 
 @router.patch("/products/{product_id}")

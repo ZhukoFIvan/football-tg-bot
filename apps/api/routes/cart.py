@@ -91,11 +91,21 @@ async def format_cart_response(cart: Cart, user: User) -> CartResponse:
         total_items += cart_item.quantity
         total_amount += subtotal
 
+        # Получить первое изображение из массива
+        import json
+        product_image = None
+        if product.images:
+            try:
+                images_list = json.loads(product.images)
+                product_image = images_list[0] if images_list else None
+            except:
+                product_image = None
+
         items.append(CartItemResponse(
             id=cart_item.id,
             product_id=product.id,
             product_title=product.title,
-            product_image=product.image,
+            product_image=product_image,
             product_price=product.price,
             product_old_price=product.old_price,
             quantity=cart_item.quantity,
