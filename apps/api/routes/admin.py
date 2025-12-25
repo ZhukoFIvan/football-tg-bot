@@ -316,9 +316,11 @@ async def admin_delete_category(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    # Удалить изображение
-    if category.image:
-        delete_file(category.image)
+    # Удалить изображения
+    if category.main_image:
+        delete_file(category.main_image)
+    if category.additional_image:
+        delete_file(category.additional_image)
 
     await db.delete(category)
     await db.commit()
