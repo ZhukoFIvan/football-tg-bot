@@ -18,7 +18,7 @@ mkdir -p uploads/banners
 
 # Установка прав доступа для Docker
 echo "🔑 Setting permissions..."
-chmod -R 777 uploads/
+sudo chmod -R 777 uploads/
 
 # Получение обновлений (если используется Git)
 if [ -d ".git" ]; then
@@ -49,7 +49,7 @@ docker compose -f docker-compose.prod.yml exec -T api alembic upgrade head
 
 # Финальная проверка прав
 echo "🔧 Final permission check..."
-chmod -R 777 uploads/
+sudo chmod -R 777 uploads/
 
 # Проверка статуса
 echo "✅ Checking status..."
