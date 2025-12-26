@@ -462,6 +462,8 @@ async def admin_delete_product(
     admin: User = Depends(get_admin_user)
 ):
     """Удалить товар"""
+    import json
+
     result = await db.execute(
         select(Product).where(Product.id == product_id)
     )
@@ -470,9 +472,14 @@ async def admin_delete_product(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Удалить изображение
-    if product.image:
-        delete_file(product.image)
+    # Удалить все изображения
+    if product.images:
+        try:
+            images_list = json.loads(product.images)
+            for image_path in images_list:
+                delete_file(image_path)
+        except:
+            pass
 
     await db.delete(product)
     await db.commit()
