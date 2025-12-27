@@ -4,7 +4,8 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
 from core.db.session import get_db
@@ -55,6 +56,7 @@ class CategoryResponse(BaseModel):
     description: Optional[str] = None
     main_image: Optional[str] = None
     additional_image: Optional[str] = None
+    show_on_main: bool
     sort_order: int
     is_active: bool
 
@@ -167,8 +169,6 @@ async def get_products(
     - category_id: фильтр по категории
     - section_id: фильтр по секции
     """
-    from sqlalchemy.orm import selectinload
-
     query = select(Product).where(Product.is_active == True)
 
     # Подгрузить badge для каждого товара

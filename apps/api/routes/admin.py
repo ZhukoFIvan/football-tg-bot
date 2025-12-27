@@ -43,6 +43,7 @@ class CategoryCreate(BaseModel):
     title: str
     slug: str
     description: Optional[str] = None
+    show_on_main: bool = False  # Показывать на главной
     sort_order: int = 0
     is_active: bool = True
 
@@ -51,6 +52,7 @@ class CategoryUpdate(BaseModel):
     title: Optional[str] = None
     slug: Optional[str] = None
     description: Optional[str] = None
+    show_on_main: Optional[bool] = None  # Показывать на главной
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
 

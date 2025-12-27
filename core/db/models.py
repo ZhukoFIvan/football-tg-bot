@@ -70,6 +70,8 @@ class Category(Base):
     main_image = Column(String(500), nullable=True)  # Основное изображение
     # Дополнительное изображение
     additional_image = Column(String(500), nullable=True)
+    show_on_main = Column(Boolean, default=False,
+                          nullable=False)  # Показывать на главной
     sort_order = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
