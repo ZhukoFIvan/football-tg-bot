@@ -154,6 +154,56 @@ async def get_categories(
     return categories
 
 
+@router.get("/categories/main-screen")
+async def get_main_screen_categories(
+    db: AsyncSession = Depends(get_db),
+    limit_per_category: int = 8  # Лимит товаров в слайдере
+):
+    """
+    Получить категории для главного экрана с товарами
+    
+    Возвращает список категорий, которые отмечены как show_on_main=true,
+    вместе с товарами для слайдера и общим количеством товаров в категории
+    """
+    # Получить категории для главного экрана
+    categories_result = await db.execute(
+        select(Category)
+        .where(Category.is_active == True, Category.show_on_main == True)
+        .order_by(Category.sort_order, Category.id)
+    )
+    categories = categories_result.scalars().all()
+    
+    response = []
+    
+    for category in categories:
+        # Получить товары категории для слайдера (лимит)
+        products_result = await db.execute(
+            select(Product)
+            .where(Product.category_id == category.id, Product.is_active == True)
+            .options(selectinload(Product.badge))
+            .order_by(Product.created_at.desc())
+            .limit(limit_per_category)
+        )
+        products = products_result.scalars().all()
+        
+        # Получить общее количество товаров в категории
+        count_result = await db.execute(
+            select(func.count(Product.id))
+            .where(Product.category_id == category.id, Product.is_active == True)
+        )
+        total_products = count_result.scalar()
+        
+        # Форматировать ответ
+        response.append({
+            "category": CategoryResponse.from_orm(category),
+            "products": [ProductResponse.from_orm(p) for p in products],
+            "total_products": total_products,
+            "has_more": total_products > limit_per_category
+        })
+    
+    return response
+
+
 @router.get("/products", response_model=List[ProductResponse])
 async def get_products(
     category_id: Optional[int] = None,
