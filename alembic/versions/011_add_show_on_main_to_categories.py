@@ -24,3 +24,5 @@ def upgrade():
 def downgrade():
     # Удалить поле show_on_main
     op.drop_column('categories', 'show_on_main')
+
+

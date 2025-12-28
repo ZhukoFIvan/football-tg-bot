@@ -241,3 +241,15 @@ class BonusTransaction(Base):
     # Relationships
     user = relationship("User", back_populates="bonus_transactions")
     order = relationship("Order")
+
+
+class SiteSettings(Base):
+    """Глобальные настройки сайта (для всех пользователей)"""
+    __tablename__ = "site_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(String(500), nullable=False)
+    description = Column(String(500), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow, nullable=False)

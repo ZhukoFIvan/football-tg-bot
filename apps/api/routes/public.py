@@ -9,12 +9,20 @@ from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
 from core.db.session import get_db
-from core.db.models import Section, Category, Product
+from core.db.models import Section, Category, Product, SiteSettings
 
 router = APIRouter()
 
 
 # Pydantic схемы для ответов
+class SiteSettingsResponse(BaseModel):
+    snow_enabled: bool
+    # Можно добавить другие настройки в будущем
+
+    class Config:
+        from_attributes = True
+
+
 class SectionResponse(BaseModel):
     id: int
     name: str
@@ -122,6 +130,25 @@ class ProductResponse(BaseModel):
         )
 
 
+@router.get("/settings", response_model=SiteSettingsResponse)
+async def get_site_settings(db: AsyncSession = Depends(get_db)):
+    """
+    Получить глобальные настройки сайта (снег, и т.д.)
+    Этот эндпоинт вызывается при загрузке сайта
+    """
+    # Получить настройку snow_enabled
+    result = await db.execute(
+        select(SiteSettings).where(SiteSettings.key == "snow_enabled")
+    )
+    snow_setting = result.scalar_one_or_none()
+
+    snow_enabled = False
+    if snow_setting and snow_setting.value.lower() == "true":
+        snow_enabled = True
+
+    return SiteSettingsResponse(snow_enabled=snow_enabled)
+
+
 @router.get("/sections", response_model=List[SectionResponse])
 async def get_sections(db: AsyncSession = Depends(get_db)):
     """
@@ -161,7 +188,7 @@ async def get_main_screen_categories(
 ):
     """
     Получить категории для главного экрана с товарами
-    
+
     Возвращает список категорий, которые отмечены как show_on_main=true,
     вместе с товарами для слайдера и общим количеством товаров в категории
     """
@@ -172,9 +199,9 @@ async def get_main_screen_categories(
         .order_by(Category.sort_order, Category.id)
     )
     categories = categories_result.scalars().all()
-    
+
     response = []
-    
+
     for category in categories:
         # Получить товары категории для слайдера (лимит)
         products_result = await db.execute(
@@ -185,14 +212,14 @@ async def get_main_screen_categories(
             .limit(limit_per_category)
         )
         products = products_result.scalars().all()
-        
+
         # Получить общее количество товаров в категории
         count_result = await db.execute(
             select(func.count(Product.id))
             .where(Product.category_id == category.id, Product.is_active == True)
         )
         total_products = count_result.scalar()
-        
+
         # Форматировать ответ
         response.append({
             "category": CategoryResponse.from_orm(category),
@@ -200,7 +227,7 @@ async def get_main_screen_categories(
             "total_products": total_products,
             "has_more": total_products > limit_per_category
         })
-    
+
     return response
 
 

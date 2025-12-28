@@ -11,7 +11,7 @@ import json
 
 from core.db.session import get_db
 from core.db.models import (
-    Section, Category, Product, Badge, Banner, User, Order
+    Section, Category, Product, Badge, Banner, User, Order, SiteSettings
 )
 from core.dependencies import get_admin_user
 from core.storage import save_upload_file, delete_file
@@ -744,3 +744,72 @@ async def admin_upload_banner_image(
     await db.commit()
     await db.refresh(banner)
     return {"ok": True, "path": file_path}
+
+
+# ==================== SITE SETTINGS ====================
+
+class SiteSettingsUpdate(BaseModel):
+    snow_enabled: Optional[bool] = None
+
+
+@router.get("/site-settings")
+async def admin_get_site_settings(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    """Получить все настройки сайта"""
+    result = await db.execute(select(SiteSettings))
+    settings = result.scalars().all()
+
+    # Преобразовать в удобный формат
+    settings_dict = {}
+    for setting in settings:
+        # Конвертировать строковые значения в bool для snow_enabled
+        if setting.key == "snow_enabled":
+            settings_dict[setting.key] = setting.value.lower() == "true"
+        else:
+            settings_dict[setting.key] = setting.value
+
+    return settings_dict
+
+
+@router.patch("/site-settings")
+async def admin_update_site_settings(
+    settings: SiteSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    """Обновить настройки сайта (включить/выключить снег и т.д.)"""
+
+    # Обновить snow_enabled если передан
+    if settings.snow_enabled is not None:
+        result = await db.execute(
+            select(SiteSettings).where(SiteSettings.key == "snow_enabled")
+        )
+        snow_setting = result.scalar_one_or_none()
+
+        if snow_setting:
+            snow_setting.value = "true" if settings.snow_enabled else "false"
+        else:
+            # Создать если не существует
+            new_setting = SiteSettings(
+                key="snow_enabled",
+                value="true" if settings.snow_enabled else "false",
+                description="Включить снег на сайте"
+            )
+            db.add(new_setting)
+
+    await db.commit()
+
+    # Вернуть обновленные настройки
+    result = await db.execute(select(SiteSettings))
+    settings = result.scalars().all()
+
+    settings_dict = {}
+    for setting in settings:
+        if setting.key == "snow_enabled":
+            settings_dict[setting.key] = setting.value.lower() == "true"
+        else:
+            settings_dict[setting.key] = setting.value
+
+    return {"ok": True, "settings": settings_dict}
