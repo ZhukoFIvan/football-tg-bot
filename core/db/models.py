@@ -253,3 +253,23 @@ class SiteSettings(Base):
     description = Column(String(500), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow,
                         onupdate=datetime.utcnow, nullable=False)
+
+
+class Review(Base):
+    """Отзывы на товары"""
+    __tablename__ = "reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey(
+        "products.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey(
+        "users.id", ondelete="CASCADE"), nullable=False)
+    rating = Column(Integer, nullable=False)  # От 1 до 5 звёзд
+    comment = Column(Text, nullable=True)  # Текст отзыва (опционально)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    product = relationship("Product", back_populates="reviews")
+    user = relationship("User")

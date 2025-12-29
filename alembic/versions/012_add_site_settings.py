@@ -42,3 +42,4 @@ def downgrade():
     op.drop_index(op.f('ix_site_settings_key'), table_name='site_settings')
     op.drop_index(op.f('ix_site_settings_id'), table_name='site_settings')
     op.drop_table('site_settings')
+

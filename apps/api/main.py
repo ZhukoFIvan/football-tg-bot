@@ -8,7 +8,7 @@ from pathlib import Path
 from core.config import settings
 
 # Импорт роутеров
-from apps.api.routes import health, public, auth, admin, stats, public_banners, cart, orders, bonus, admin_bonus
+from apps.api.routes import health, public, auth, admin, stats, public_banners, cart, orders, bonus, admin_bonus, admin_cleanup, reviews
 
 # Создание приложения
 app = FastAPI(
@@ -16,6 +16,9 @@ app = FastAPI(
     description="REST API для магазина игровых ключей в Telegram",
     version="1.0.0",
     debug=settings.DEBUG,
+    docs_url="/api/docs",  # Swagger UI
+    redoc_url="/api/redoc",  # ReDoc
+    openapi_url="/api/openapi.json"  # OpenAPI схема
 )
 
 # CORS middleware для Telegram WebApp
@@ -32,24 +35,43 @@ uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-# Подключение роутеров
-app.include_router(health.router, tags=["Health"])
-app.include_router(public.router, tags=["Catalog"])
-app.include_router(public_banners.router, tags=["Banners & Badges"])
-app.include_router(auth.router, prefix="/auth", tags=["Auth"])
-app.include_router(cart.router, prefix="/cart", tags=["Cart"])
-app.include_router(bonus.router, prefix="/bonus", tags=["Bonus"])
-app.include_router(orders.router, prefix="/orders", tags=["Orders"])
-app.include_router(admin.router, prefix="/admin", tags=["Admin"])
-app.include_router(admin_bonus.router, prefix="/admin/bonus", tags=["Admin Bonus"])
-app.include_router(stats.router, prefix="/admin/stats", tags=["Admin Stats"])
+# Подключение роутеров с префиксом /api
+app.include_router(health.router, prefix="/api", tags=["Health"])
+app.include_router(public.router, prefix="/api", tags=["Catalog"])
+app.include_router(public_banners.router, prefix="/api",
+                   tags=["Banners & Badges"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(cart.router, prefix="/api/cart", tags=["Cart"])
+app.include_router(bonus.router, prefix="/api/bonus", tags=["Bonus"])
+app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+app.include_router(admin_bonus.router,
+                   prefix="/api/admin/bonus", tags=["Admin Bonus"])
+app.include_router(stats.router, prefix="/api/admin/stats",
+                   tags=["Admin Stats"])
+app.include_router(admin_cleanup.router, prefix="/api/admin",
+                   tags=["Admin Cleanup"])
+app.include_router(reviews.router, prefix="/api", tags=["Reviews"])
 
 
 @app.on_event("startup")
 async def startup_event():
     """Действия при запуске приложения"""
-    print("🚀 API Server starting...")
-    print(f"📍 API URL: {settings.API_PUBLIC_URL}")
+    import logging
+    import asyncio
+    from core.tasks import run_cleanup_task
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+    logging.info("🚀 API Server starting...")
+    logging.info(f"📍 API URL: {settings.API_PUBLIC_URL}")
+
+    # Запустить фоновую задачу очистки просроченных секций
+    asyncio.create_task(run_cleanup_task())
+    logging.info("✅ Background cleanup task started")
 
 
 @app.on_event("shutdown")

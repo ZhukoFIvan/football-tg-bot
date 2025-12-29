@@ -26,3 +26,4 @@ def downgrade():
     op.drop_column('categories', 'show_on_main')
 
 
+

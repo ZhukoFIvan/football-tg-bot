@@ -47,6 +47,11 @@ sleep 10
 echo "🗄️  Running migrations..."
 docker compose -f docker-compose.prod.yml exec -T api alembic upgrade head
 
+# Очистка старых Docker образов
+echo "🧹 Cleaning up old Docker images..."
+docker image prune -a -f
+echo "✅ Old images removed"
+
 # Финальная проверка прав
 echo "🔧 Final permission check..."
 sudo chmod -R 777 uploads/
@@ -57,6 +62,9 @@ docker compose -f docker-compose.prod.yml ps
 
 echo ""
 echo "✨ Deployment completed!"
+echo ""
+echo "📊 Current disk usage:"
+docker system df
 echo ""
 echo "📊 View logs:"
 echo "  docker compose -f docker-compose.prod.yml logs -f"
@@ -69,3 +77,6 @@ echo "  uploads/sections/"
 echo "  uploads/categories/"
 echo "  uploads/products/"
 echo "  uploads/banners/"
+echo ""
+echo "🧹 To cleanup unused images:"
+echo "  POST /admin/cleanup/unused-images"
