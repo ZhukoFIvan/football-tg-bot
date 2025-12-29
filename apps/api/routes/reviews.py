@@ -150,6 +150,24 @@ async def get_product_rating(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    # Пересчитать статистику напрямую из таблицы reviews
+    stats_result = await db.execute(
+        select(
+            func.avg(Review.rating).label('avg_rating'),
+            func.count(Review.id).label('count')
+        )
+        .where(Review.product_id == product_id)
+    )
+    stats = stats_result.first()
+
+    # Вычислить средний рейтинг и количество отзывов
+    if stats.avg_rating is not None:
+        average_rating = round(float(stats.avg_rating), 2)
+        reviews_count = stats.count
+    else:
+        average_rating = 0.0
+        reviews_count = 0
+
     # Получить распределение рейтингов
     rating_dist_result = await db.execute(
         select(Review.rating, func.count(Review.id))
@@ -164,8 +182,8 @@ async def get_product_rating(
             rating_distribution[i] = 0
 
     return ProductRatingInfo(
-        average_rating=float(product.average_rating),
-        reviews_count=product.reviews_count,
+        average_rating=average_rating,
+        reviews_count=reviews_count,
         rating_distribution=rating_distribution
     )
 
