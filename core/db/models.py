@@ -114,6 +114,8 @@ class Product(Base):
     category = relationship("Category", back_populates="products")
     section = relationship("Section")
     badge = relationship("Badge")
+    reviews = relationship(
+        "Review", back_populates="product", cascade="all, delete-orphan")
 
 
 class Badge(Base):
