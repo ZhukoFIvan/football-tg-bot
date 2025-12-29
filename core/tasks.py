@@ -7,7 +7,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
-from core.db.session import async_session_maker
+from core.db.session import AsyncSessionLocal
 from core.db.models import Section
 from core.storage import delete_file
 
@@ -19,7 +19,7 @@ async def cleanup_expired_sections():
     Удаляет секции, у которых истекло время (end_time < now)
     Также удаляет связанные изображения
     """
-    async with async_session_maker() as db:
+    async with AsyncSessionLocal() as db:
         try:
             # Найти все секции с истекшим временем
             result = await db.execute(
@@ -73,4 +73,3 @@ async def run_cleanup_task():
 
         # Ждать 1 час перед следующей проверкой
         await asyncio.sleep(3600)  # 3600 секунд = 1 час
-
