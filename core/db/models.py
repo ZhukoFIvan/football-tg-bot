@@ -106,6 +106,10 @@ class Product(Base):
     currency = Column(String(10), default="RUB", nullable=False)
     stock_count = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    # Средний рейтинг (вычисляется из отзывов)
+    average_rating = Column(Numeric(3, 2), default=0, nullable=False)
+    # Количество отзывов
+    reviews_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow,
                         onupdate=datetime.utcnow, nullable=False)
