@@ -11,8 +11,9 @@ from decimal import Decimal
 from datetime import datetime
 
 from core.db.session import get_db
-from core.db.models import Cart, CartItem, Order, OrderItem, Product, User
+from core.db.models import Cart, CartItem, Order, OrderItem, Product, User, PromoCode, BonusTransaction
 from core.dependencies import get_current_user
+from core.bonus import BonusSystem
 
 router = APIRouter()
 
@@ -46,7 +47,8 @@ class OrderResponse(BaseModel):
 
 class CreateOrderRequest(BaseModel):
     """Создать заказ из корзины"""
-    pass  # Пока без дополнительных параметров
+    promo_code: str | None = None  # Промокод (опционально)
+    bonus_to_use: int = 0  # Количество бонусов к использованию
 
 
 # ==================== ENDPOINTS ====================
@@ -191,11 +193,79 @@ async def create_order(
             "price": product.price
         })
 
+    # ==================== ПРИМЕНИТЬ ПРОМОКОД ====================
+    promo_discount = Decimal(0)
+    promo_code_id = None
+    
+    if request.promo_code:
+        code_upper = request.promo_code.upper()
+        promo_result = await db.execute(
+            select(PromoCode).where(PromoCode.code == code_upper)
+        )
+        promo = promo_result.scalar_one_or_none()
+        
+        if promo and promo.is_active:
+            # Проверить срок действия
+            now = datetime.utcnow()
+            if (not promo.valid_from or now >= promo.valid_from) and \
+               (not promo.valid_until or now <= promo.valid_until):
+                
+                # Проверить лимит использований
+                if not promo.usage_limit or promo.usage_count < promo.usage_limit:
+                    
+                    # Проверить минимальную сумму
+                    if not promo.min_order_amount or total_amount >= promo.min_order_amount:
+                        
+                        # Рассчитать скидку
+                        if promo.discount_type == "percent":
+                            promo_discount = total_amount * (promo.discount_value / Decimal('100'))
+                            if promo.max_discount:
+                                promo_discount = min(promo_discount, promo.max_discount)
+                        else:  # fixed
+                            promo_discount = promo.discount_value
+                        
+                        # Скидка не может быть больше суммы
+                        promo_discount = min(promo_discount, total_amount)
+                        promo_code_id = promo.id
+                        
+                        # Увеличить счётчик использований
+                        promo.usage_count += 1
+
+    # Применить скидку от промокода
+    total_after_promo = total_amount - promo_discount
+
+    # ==================== ПРИМЕНИТЬ БОНУСЫ ====================
+    bonus_used = 0
+    bonus_discount = Decimal(0)
+    
+    if request.bonus_to_use > 0:
+        # Проверить доступность бонусов
+        if request.bonus_to_use > current_user.bonus_balance:
+            bonus_used = current_user.bonus_balance
+        else:
+            bonus_used = request.bonus_to_use
+        
+        # Проверить максимальное использование (50% от суммы после промокода)
+        max_bonus = await BonusSystem.calculate_max_bonus_usage(total_after_promo)
+        if bonus_used > max_bonus:
+            bonus_used = max_bonus
+        
+        bonus_discount = Decimal(bonus_used * BonusSystem.BONUS_TO_RUBLE)
+        
+        # Списать бонусы
+        current_user.bonus_balance -= bonus_used
+
+    # Итоговая сумма = сумма товаров - промокод - бонусы
+    final_amount = total_after_promo - bonus_discount
+    final_amount = max(Decimal(0), final_amount)  # Не может быть отрицательной
+
     # Создать заказ
     order = Order(
         user_id=current_user.id,
+        promo_code_id=promo_code_id,
+        promo_discount=promo_discount,
         status="pending",
-        total_amount=total_amount,
+        total_amount=final_amount,
         currency="RUB"
     )
     db.add(order)
@@ -213,6 +283,40 @@ async def create_order(
     for cart_item in cart.items:
         product = cart_item.product
         product.stock_count -= cart_item.quantity
+
+    # ==================== БОНУСНЫЕ ТРАНЗАКЦИИ ====================
+    
+    # Создать транзакцию списания бонусов (если использовались)
+    if bonus_used > 0:
+        bonus_spent_tx = BonusTransaction(
+            user_id=current_user.id,
+            order_id=order.id,
+            amount=-bonus_used,
+            type="spent",
+            description=f"Списание бонусов за заказ #{order.id}"
+        )
+        db.add(bonus_spent_tx)
+    
+    # Рассчитать начисление бонусов (от итоговой суммы)
+    earned_bonuses = await BonusSystem.calculate_earned_bonuses(final_amount, current_user)
+    
+    if earned_bonuses > 0:
+        # Начислить бонусы
+        current_user.bonus_balance += earned_bonuses
+        
+        # Создать транзакцию начисления
+        bonus_earned_tx = BonusTransaction(
+            user_id=current_user.id,
+            order_id=order.id,
+            amount=earned_bonuses,
+            type="earned",
+            description=f"Начисление бонусов за заказ #{order.id}"
+        )
+        db.add(bonus_earned_tx)
+    
+    # Обновить статистику пользователя
+    current_user.total_spent += final_amount
+    current_user.total_orders += 1
 
     # Очистить корзину
     for cart_item in cart.items:

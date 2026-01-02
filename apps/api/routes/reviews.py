@@ -353,3 +353,4 @@ async def update_product_rating(db: AsyncSession, product_id: int):
     else:
         product.average_rating = Decimal('0')
         product.reviews_count = 0
+

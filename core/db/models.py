@@ -194,9 +194,12 @@ class Order(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey(
         "users.id", ondelete="CASCADE"), nullable=False)
+    promo_code_id = Column(Integer, ForeignKey(
+        "promo_codes.id", ondelete="SET NULL"), nullable=True)
     # pending, paid, completed, cancelled
     status = Column(String(50), default="pending", nullable=False)
     total_amount = Column(Numeric(10, 2), nullable=False)
+    promo_discount = Column(Numeric(10, 2), default=0, nullable=False)  # Скидка от промокода
     currency = Column(String(10), default="RUB", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow,
@@ -204,6 +207,7 @@ class Order(Base):
 
     # Relationships
     user = relationship("User", back_populates="orders")
+    promo_code = relationship("PromoCode", back_populates="orders")
     items = relationship("OrderItem", back_populates="order",
                          cascade="all, delete-orphan")
 
@@ -279,3 +283,26 @@ class Review(Base):
     # Relationships
     product = relationship("Product", back_populates="reviews")
     user = relationship("User")
+
+
+class PromoCode(Base):
+    """Промокоды для скидок"""
+    __tablename__ = "promo_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, nullable=False, index=True)  # "SUMMER2025"
+    discount_type = Column(String(20), nullable=False)  # "percent" или "fixed"
+    discount_value = Column(Numeric(10, 2), nullable=False)  # 20 (для 20%) или 500 (для 500₽)
+    min_order_amount = Column(Numeric(10, 2), nullable=True)  # Минимальная сумма заказа
+    max_discount = Column(Numeric(10, 2), nullable=True)  # Максимальная скидка (для процентов)
+    usage_limit = Column(Integer, nullable=True)  # Сколько раз можно использовать (null = безлимит)
+    usage_count = Column(Integer, default=0, nullable=False)  # Сколько раз использовали
+    valid_from = Column(DateTime, nullable=True)  # Дата начала действия
+    valid_until = Column(DateTime, nullable=True)  # Дата окончания
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    orders = relationship("Order", back_populates="promo_code")
