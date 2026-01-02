@@ -43,20 +43,17 @@ class BonusSystem:
         Рассчитать количество бонусных рублей к начислению
 
         Args:
-            order_amount: Сумма заказа
+            order_amount: Сумма заказа (не используется, но оставлен для совместимости)
             user: Пользователь
 
         Returns:
             Количество бонусных рублей к начислению
         """
-        # Базовое начисление (5% от суммы)
-        base_bonus = int(float(order_amount) * BonusSystem.BONUS_RATE)
-
         # Бонус за достижение порога (только бонусные рубли, не FC Points)
         next_order_count = user.total_orders + 1
         milestone_bonus = BonusSystem.BONUS_MILESTONES.get(next_order_count, 0)
 
-        return base_bonus + milestone_bonus
+        return milestone_bonus
 
     @staticmethod
     async def calculate_max_bonus_usage(order_amount: Decimal) -> int:

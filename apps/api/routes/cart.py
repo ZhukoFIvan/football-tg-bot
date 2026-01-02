@@ -42,7 +42,7 @@ class CartResponse(BaseModel):
     total_amount: Decimal  # Общая сумма
     bonus_balance: int  # Доступные бонусы пользователя
     max_bonus_usage: int  # Максимум бонусов можно использовать
-    bonus_will_earn: int  # Сколько бонусов будет начислено
+    bonus_will_earn: int  # Сколько бонусов будет начислено за эту покупку
 
 
 class AddToCartRequest(BaseModel):
@@ -114,6 +114,8 @@ async def format_cart_response(cart: Cart, user: User) -> CartResponse:
 
     # Рассчитать бонусы
     max_bonus_usage = await BonusSystem.calculate_max_bonus_usage(total_amount)
+    
+    # Рассчитать начисление бонусов (зависит только от количества покупок)
     bonus_will_earn = await BonusSystem.calculate_earned_bonuses(total_amount, user)
 
     return CartResponse(
