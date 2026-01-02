@@ -47,7 +47,7 @@ sleep 10
 echo "🗄️  Running migrations..."
 docker compose -f docker-compose.prod.yml exec -T api alembic upgrade head
 
-пше # Очистка старых Docker образов
+# Очистка старых Docker образов
 echo "🧹 Cleaning up old Docker images..."
 docker image prune -a -f
 echo "✅ Old images removed"
