@@ -273,11 +273,13 @@ async def get_product(
     Получить детальную информацию о товаре
     """
     result = await db.execute(
-        select(Product).where(Product.id == product_id)
+        select(Product)
+        .options(selectinload(Product.badge))
+        .where(Product.id == product_id)
     )
     product = result.scalar_one_or_none()
 
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    return product
+    return ProductResponse.from_orm(product)

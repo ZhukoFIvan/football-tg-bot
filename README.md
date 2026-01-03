@@ -673,10 +673,11 @@ POST   /admin/categories/{id}/image # Загрузить изображение
 
 ```http
 GET    /admin/products              # Получить все товары
+GET    /admin/products/{id}         # Получить один товар по ID
 POST   /admin/products              # Создать товар
 PATCH  /admin/products/{id}         # Обновить товар
 DELETE /admin/products/{id}         # Удалить товар
-POST   /admin/products/{id}/image   # Загрузить изображение
+POST   /admin/products/{id}/images  # Загрузить изображения
 ```
 
 #### Управление бейджами
