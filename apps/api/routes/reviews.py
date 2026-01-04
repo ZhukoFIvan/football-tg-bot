@@ -60,6 +60,7 @@ class ReviewResponse(BaseModel):
     created_at: str
     updated_at: str
     is_own: bool = False  # Флаг: это отзыв текущего пользователя
+    status: Optional[str] = None  # Статус отзыва (показывается только для собственных неодобренных отзывов)
 
     class Config:
         from_attributes = True
@@ -67,6 +68,12 @@ class ReviewResponse(BaseModel):
     @classmethod
     def from_orm_with_user(cls, review: Review, current_user_id: Optional[int] = None):
         """Создать response с информацией о пользователе"""
+        is_own = (current_user_id == review.user_id) if current_user_id else False
+        # Показывать статус только для собственных отзывов, которые не одобрены
+        status = None
+        if is_own and review.status != "approved":
+            status = review.status
+
         return cls(
             id=review.id,
             product_id=review.product_id,
@@ -75,8 +82,8 @@ class ReviewResponse(BaseModel):
             comment=review.comment,
             created_at=review.created_at.isoformat(),
             updated_at=review.updated_at.isoformat(),
-            is_own=(current_user_id ==
-                    review.user_id) if current_user_id else False
+            is_own=is_own,
+            status=status
         )
 
 
@@ -99,6 +106,7 @@ async def get_product_reviews(
 ):
     """
     Получить отзывы на товар
+    Показывает одобренные отзывы для всех + собственные отзывы пользователя (любого статуса)
     """
     # Проверить существование товара
     product_result = await db.execute(
@@ -108,19 +116,39 @@ async def get_product_reviews(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Получить только одобренные отзывы
-    reviews_result = await db.execute(
-        select(Review)
-        .where(
-            and_(
-                Review.product_id == product_id,
-                Review.status == "approved"
+    # Получить одобренные отзывы и собственные отзывы пользователя (если авторизован)
+    if current_user:
+        # Получить одобренные отзывы ИЛИ собственные отзывы текущего пользователя
+        reviews_result = await db.execute(
+            select(Review)
+            .where(
+                and_(
+                    Review.product_id == product_id,
+                    or_(
+                        Review.status == "approved",
+                        Review.user_id == current_user.id
+                    )
+                )
             )
+            .order_by(Review.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
-        .order_by(Review.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    else:
+        # Для неавторизованных - только одобренные отзывы
+        reviews_result = await db.execute(
+            select(Review)
+            .where(
+                and_(
+                    Review.product_id == product_id,
+                    Review.status == "approved"
+                )
+            )
+            .order_by(Review.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+
     reviews = reviews_result.scalars().all()
 
     # Загрузить пользователей для отзывов
