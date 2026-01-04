@@ -74,3 +74,4 @@ async def run_cleanup_task():
         # Ждать 1 час перед следующей проверкой
         await asyncio.sleep(3600)  # 3600 секунд = 1 час
 
+

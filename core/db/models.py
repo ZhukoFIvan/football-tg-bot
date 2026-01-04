@@ -276,6 +276,7 @@ class Review(Base):
         "users.id", ondelete="CASCADE"), nullable=False)
     rating = Column(Integer, nullable=False)  # От 1 до 5 звёзд
     comment = Column(Text, nullable=True)  # Текст отзыва (опционально)
+    status = Column(String(20), default="pending", nullable=False)  # pending, approved, rejected
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow,
                         onupdate=datetime.utcnow, nullable=False)

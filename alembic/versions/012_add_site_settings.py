@@ -44,3 +44,4 @@ def downgrade():
     op.drop_table('site_settings')
 
 
+

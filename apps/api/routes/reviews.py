@@ -108,10 +108,15 @@ async def get_product_reviews(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Получить отзывы
+    # Получить только одобренные отзывы
     reviews_result = await db.execute(
         select(Review)
-        .where(Review.product_id == product_id)
+        .where(
+            and_(
+                Review.product_id == product_id,
+                Review.status == "approved"
+            )
+        )
         .order_by(Review.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -150,13 +155,18 @@ async def get_product_rating(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Пересчитать статистику напрямую из таблицы reviews
+    # Пересчитать статистику напрямую из таблицы reviews (только одобренные)
     stats_result = await db.execute(
         select(
             func.avg(Review.rating).label('avg_rating'),
             func.count(Review.id).label('count')
         )
-        .where(Review.product_id == product_id)
+        .where(
+            and_(
+                Review.product_id == product_id,
+                Review.status == "approved"
+            )
+        )
     )
     stats = stats_result.first()
 
@@ -168,10 +178,15 @@ async def get_product_rating(
         average_rating = 0.0
         reviews_count = 0
 
-    # Получить распределение рейтингов
+    # Получить распределение рейтингов (только одобренные)
     rating_dist_result = await db.execute(
         select(Review.rating, func.count(Review.id))
-        .where(Review.product_id == product_id)
+        .where(
+            and_(
+                Review.product_id == product_id,
+                Review.status == "approved"
+            )
+        )
         .group_by(Review.rating)
     )
     rating_distribution = {row[0]: row[1] for row in rating_dist_result.all()}
@@ -223,12 +238,13 @@ async def create_review(
             detail="You have already reviewed this product. Use PUT to update your review."
         )
 
-    # Создать отзыв
+    # Создать отзыв (со статусом pending - ожидает модерации)
     review = Review(
         product_id=review_data.product_id,
         user_id=current_user.id,
         rating=review_data.rating,
-        comment=review_data.comment
+        comment=review_data.comment,
+        status="pending"
     )
     db.add(review)
 
@@ -274,6 +290,9 @@ async def update_review(
         review.rating = review_data.rating
     if review_data.comment is not None:
         review.comment = review_data.comment
+
+    # После редактирования отзыв снова отправляется на модерацию
+    review.status = "pending"
 
     # Обновить рейтинг товара
     await update_product_rating(db, review.product_id)
@@ -328,15 +347,20 @@ async def delete_review(
 
 async def update_product_rating(db: AsyncSession, product_id: int):
     """
-    Обновить средний рейтинг и количество отзывов у товара
+    Обновить средний рейтинг и количество отзывов у товара (только одобренные)
     """
-    # Посчитать средний рейтинг и количество отзывов
+    # Посчитать средний рейтинг и количество отзывов (только одобренные)
     stats_result = await db.execute(
         select(
             func.avg(Review.rating).label('avg_rating'),
             func.count(Review.id).label('count')
         )
-        .where(Review.product_id == product_id)
+        .where(
+            and_(
+                Review.product_id == product_id,
+                Review.status == "approved"
+            )
+        )
     )
     stats = stats_result.first()
 
