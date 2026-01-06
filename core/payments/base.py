@@ -16,10 +16,14 @@ class PaymentProvider(ABC):
         amount: Decimal,
         currency: str,
         description: str,
-        user_id: int
+        user_id: int,
+        payment_method: str = "card"  # "card" для карты, "sbp" для СБП
     ) -> Dict:
         """
         Создать платеж
+
+        Args:
+            payment_method: "card" для оплаты картой, "sbp" для СБП
 
         Returns:
             {

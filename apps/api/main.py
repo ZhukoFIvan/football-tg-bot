@@ -8,7 +8,7 @@ from pathlib import Path
 from core.config import settings
 
 # Импорт роутеров
-from apps.api.routes import health, public, auth, admin, stats, public_banners, cart, orders, bonus, admin_bonus, admin_cleanup, reviews, promo_codes, admin_reviews
+from apps.api.routes import health, public, auth, admin, stats, public_banners, cart, orders, bonus, admin_bonus, admin_cleanup, reviews, promo_codes, admin_reviews, payments
 
 # Создание приложения
 app = FastAPI(
@@ -55,6 +55,7 @@ app.include_router(admin_reviews.router, prefix="/api/admin",
                    tags=["Admin Reviews"])
 app.include_router(reviews.router, prefix="/api", tags=["Reviews"])
 app.include_router(promo_codes.router, prefix="/api", tags=["Promo Codes"])
+app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 
 
 @app.on_event("startup")

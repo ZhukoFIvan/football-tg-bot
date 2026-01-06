@@ -1,6 +1,7 @@
 """
 Заказы пользователя
 """
+import logging
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,8 @@ from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from decimal import Decimal
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from core.db.session import get_db
 from core.db.models import Cart, CartItem, Order, OrderItem, Product, User, PromoCode, BonusTransaction
@@ -385,8 +388,40 @@ async def cancel_order(
 
     # Обновить статус
     order.status = "cancelled"
+    
+    # Обновить статус платежа, если есть
+    from core.db.models import Payment
+    payment_result = await db.execute(
+        select(Payment).where(Payment.order_id == order_id)
+    )
+    payment = payment_result.scalar_one_or_none()
+    if payment and payment.status == "pending":
+        payment.status = "cancelled"
+        payment.cancelled_at = datetime.utcnow()
+    
     await db.commit()
     await db.refresh(order)
+    
+    # Отправить уведомление пользователю в Telegram
+    try:
+        from aiogram import Bot
+        from aiogram.enums import ParseMode
+        from core.config import settings
+        bot = Bot(token=settings.BOT_TOKEN, parse_mode=ParseMode.HTML)
+        message = f"""
+❌ <b>Заказ отменен</b>
+
+📦 Заказ #{order_id}
+💰 Сумма: {float(order.total_amount):,.2f} ₽
+
+Заказ был отменен. Товары возвращены на склад.
+"""
+        await bot.send_message(chat_id=current_user.telegram_id, text=message)
+        await bot.session.close()
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Ошибка при отправке уведомления об отмене заказа: {e}")
 
     return OrderResponse(
         id=order.id,

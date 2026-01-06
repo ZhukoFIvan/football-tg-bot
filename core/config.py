@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     # App
     DEBUG: bool = False
 
+    # Payment Providers - FreeKassa
+    FREEKASSA_MERCHANT_ID: str = ""
+    FREEKASSA_SECRET_KEY: str = ""  # Secret Key 1
+    FREEKASSA_SECRET_KEY2: str = ""  # Secret Key 2
+
+    # Payment Providers - PayPaly
+    PAYPALYCH_API_KEY: str = ""
+    PAYPALYCH_SECRET_KEY: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

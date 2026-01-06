@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from core.db.session import get_db
-from core.db.models import User, Order, Product, Section, Category
+from core.db.models import User, Order, Product, Section, Category, Payment
 from core.dependencies import get_admin_user
 
 router = APIRouter()
@@ -425,3 +425,174 @@ async def get_recent_orders(
         }
         for order in orders
     ]
+
+
+class PaymentStats(BaseModel):
+    """Статистика платежей"""
+    total_payments: int
+    pending_payments: int
+    success_payments: int
+    failed_payments: int
+    cancelled_payments: int
+    refunded_payments: int
+    total_amount: float
+    success_amount: float
+    failed_amount: float
+    cancelled_amount: float
+    refunded_amount: float
+    payments_today: int
+    payments_this_week: int
+    payments_this_month: int
+    revenue_today: float
+    revenue_this_week: float
+    revenue_this_month: float
+    by_provider: dict  # {"freekassa": {...}, "paypalych": {...}}
+    by_method: dict  # {"card": {...}, "sbp": {...}}
+
+
+@router.get("/payments", response_model=PaymentStats)
+async def get_payment_stats(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_admin_user)
+):
+    """Получить статистику платежей"""
+
+    now = datetime.utcnow()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = now - timedelta(days=7)
+    month_start = now - timedelta(days=30)
+
+    # Всего платежей
+    total_payments = await db.scalar(select(func.count(Payment.id)))
+
+    # По статусам
+    pending_payments = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.status == "pending")
+    )
+    success_payments = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.status == "success")
+    )
+    failed_payments = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.status == "failed")
+    )
+    cancelled_payments = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.status == "cancelled")
+    )
+    refunded_payments = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.status == "refunded")
+    )
+
+    # Суммы по статусам
+    total_amount = await db.scalar(
+        select(func.sum(Payment.amount))
+    ) or 0.0
+
+    success_amount = await db.scalar(
+        select(func.sum(Payment.amount)).where(Payment.status == "success")
+    ) or 0.0
+
+    failed_amount = await db.scalar(
+        select(func.sum(Payment.amount)).where(Payment.status == "failed")
+    ) or 0.0
+
+    cancelled_amount = await db.scalar(
+        select(func.sum(Payment.amount)).where(Payment.status == "cancelled")
+    ) or 0.0
+
+    refunded_amount = await db.scalar(
+        select(func.sum(Payment.amount)).where(Payment.status == "refunded")
+    ) or 0.0
+
+    # По периодам
+    payments_today = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.created_at >= today_start)
+    )
+    payments_this_week = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.created_at >= week_start)
+    )
+    payments_this_month = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.created_at >= month_start)
+    )
+
+    # Выручка по периодам (только успешные платежи)
+    revenue_today = await db.scalar(
+        select(func.sum(Payment.amount)).where(
+            and_(Payment.status == "success", Payment.created_at >= today_start)
+        )
+    ) or 0.0
+
+    revenue_this_week = await db.scalar(
+        select(func.sum(Payment.amount)).where(
+            and_(Payment.status == "success", Payment.created_at >= week_start)
+        )
+    ) or 0.0
+
+    revenue_this_month = await db.scalar(
+        select(func.sum(Payment.amount)).where(
+            and_(Payment.status == "success", Payment.created_at >= month_start)
+        )
+    ) or 0.0
+
+    # По провайдерам
+    provider_stats = {}
+    for provider in ["freekassa", "paypalych"]:
+        count = await db.scalar(
+            select(func.count(Payment.id)).where(Payment.provider == provider)
+        ) or 0
+        amount = await db.scalar(
+            select(func.sum(Payment.amount)).where(
+                and_(Payment.provider == provider, Payment.status == "success")
+            )
+        ) or 0.0
+        provider_stats[provider] = {
+            "count": count,
+            "amount": float(amount),
+            "success_count": await db.scalar(
+                select(func.count(Payment.id)).where(
+                    and_(Payment.provider == provider, Payment.status == "success")
+                )
+            ) or 0
+        }
+
+    # По методам оплаты
+    method_stats = {}
+    for method in ["card", "sbp"]:
+        count = await db.scalar(
+            select(func.count(Payment.id)).where(Payment.payment_method == method)
+        ) or 0
+        amount = await db.scalar(
+            select(func.sum(Payment.amount)).where(
+                and_(Payment.payment_method == method, Payment.status == "success")
+            )
+        ) or 0.0
+        method_stats[method] = {
+            "count": count,
+            "amount": float(amount),
+            "success_count": await db.scalar(
+                select(func.count(Payment.id)).where(
+                    and_(Payment.payment_method == method, Payment.status == "success")
+                )
+            ) or 0
+        }
+
+    return PaymentStats(
+        total_payments=total_payments or 0,
+        pending_payments=pending_payments or 0,
+        success_payments=success_payments or 0,
+        failed_payments=failed_payments or 0,
+        cancelled_payments=cancelled_payments or 0,
+        refunded_payments=refunded_payments or 0,
+        total_amount=float(total_amount),
+        success_amount=float(success_amount),
+        failed_amount=float(failed_amount),
+        cancelled_amount=float(cancelled_amount),
+        refunded_amount=float(refunded_amount),
+        payments_today=payments_today or 0,
+        payments_this_week=payments_this_week or 0,
+        payments_this_month=payments_this_month or 0,
+        revenue_today=float(revenue_today),
+        revenue_this_week=float(revenue_this_week),
+        revenue_this_month=float(revenue_this_month),
+        by_provider=provider_stats,
+        by_method=method_stats
+    )

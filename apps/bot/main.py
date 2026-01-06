@@ -5,12 +5,13 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
 
 from core.config import settings
 
 # Импорт хендлеров
-from apps.bot.handlers import start, menu
-# from apps.bot.handlers import orders, admin  # TODO: Раскомментировать когда будут готовы
+from apps.bot.handlers import start, menu, admin
+# from apps.bot.handlers import orders  # TODO: Раскомментировать когда будут готовы
 
 # Настройка логирования
 logging.basicConfig(
@@ -25,14 +26,15 @@ async def main():
     # Инициализация бота
     bot = Bot(token=settings.BOT_TOKEN, parse_mode=ParseMode.HTML)
 
-    # Инициализация диспетчера
-    dp = Dispatcher()
+    # Инициализация диспетчера с FSM storage
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
 
     # Регистрация роутеров
     dp.include_router(start.router)
     dp.include_router(menu.router)
+    dp.include_router(admin.router)
     # dp.include_router(orders.router)  # TODO: Раскомментировать когда будут готовы
-    # dp.include_router(admin.router)  # TODO: Раскомментировать когда будут готовы
 
     logger.info("🤖 Bot starting...")
     logger.info(f"👤 Owner IDs: {settings.owner_ids}")

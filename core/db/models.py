@@ -307,3 +307,28 @@ class PromoCode(Base):
 
     # Relationships
     orders = relationship("Order", back_populates="promo_code")
+
+
+class Payment(Base):
+    """Платежи"""
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    payment_id = Column(String(255), unique=True, nullable=False, index=True)  # ID платежа от провайдера
+    provider = Column(String(50), nullable=False)  # "freekassa", "paypalych"
+    payment_method = Column(String(50), nullable=False)  # "card", "sbp"
+    amount = Column(Numeric(10, 2), nullable=False)
+    currency = Column(String(10), default="RUB", nullable=False)
+    status = Column(String(50), default="pending", nullable=False, index=True)  # pending, success, failed, cancelled, refunded
+    payment_url = Column(String(500), nullable=True)
+    description = Column(Text, nullable=True)
+    paid_at = Column(DateTime, nullable=True)  # Когда был оплачен
+    cancelled_at = Column(DateTime, nullable=True)  # Когда был отменен
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    order = relationship("Order")
+    user = relationship("User")
