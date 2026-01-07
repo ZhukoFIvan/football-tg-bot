@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -122,17 +122,13 @@ async def process_broadcast_button_text(message: Message, state: FSMContext, bot
     data = await state.get_data()
     broadcast_text = data.get("broadcast_text", "")
 
-    # Получаем информацию о боте для создания ссылки
-    bot_info = await bot.get_me()
-    bot_username = bot_info.username
-
-    # Создаем клавиатуру с кнопкой
+    # Создаем клавиатуру с WebApp кнопкой
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text=button_text,
-                    url=f"https://t.me/{bot_username}?start=1"
+                    web_app=WebAppInfo(url="https://noonyashop.ru")
                 )
             ]
         ]

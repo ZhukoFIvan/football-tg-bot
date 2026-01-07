@@ -11,16 +11,14 @@ from core.config import settings
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     """Главная клавиатура"""
-    buttons = []
-    
-    # Добавляем кнопку веб-приложения, если настроен FRONTEND_URL
-    if settings.FRONTEND_URL:
-        buttons.append([
+    buttons = [
+        [
             KeyboardButton(
                 text="🛒 Открыть магазин",
-                web_app=WebAppInfo(url=settings.FRONTEND_URL)
+                web_app=WebAppInfo(url="https://noonyashop.ru")
             )
-        ])
+        ]
+    ]
     
     keyboard = ReplyKeyboardMarkup(
         keyboard=buttons,
