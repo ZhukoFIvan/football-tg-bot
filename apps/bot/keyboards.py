@@ -3,15 +3,27 @@
 """
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    WebAppInfo
 )
+from core.config import settings
 
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     """Главная клавиатура"""
-    # Пустая клавиатура - пользователи будут использовать веб-приложение
+    buttons = []
+    
+    # Добавляем кнопку веб-приложения, если настроен FRONTEND_URL
+    if settings.FRONTEND_URL:
+        buttons.append([
+            KeyboardButton(
+                text="🛒 Открыть магазин",
+                web_app=WebAppInfo(url=settings.FRONTEND_URL)
+            )
+        ])
+    
     keyboard = ReplyKeyboardMarkup(
-        keyboard=[],
+        keyboard=buttons,
         resize_keyboard=True
     )
     return keyboard

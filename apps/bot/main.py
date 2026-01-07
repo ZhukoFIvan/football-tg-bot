@@ -10,8 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from core.config import settings
 
 # Импорт хендлеров
-from apps.bot.handlers import start, menu, admin
-# from apps.bot.handlers import orders  # TODO: Раскомментировать когда будут готовы
+from apps.bot.handlers import start, admin
 
 # Настройка логирования
 logging.basicConfig(
@@ -32,9 +31,7 @@ async def main():
 
     # Регистрация роутеров
     dp.include_router(start.router)
-    dp.include_router(menu.router)
     dp.include_router(admin.router)
-    # dp.include_router(orders.router)  # TODO: Раскомментировать когда будут готовы
 
     logger.info("🤖 Bot starting...")
     logger.info(f"👤 Owner IDs: {settings.owner_ids}")

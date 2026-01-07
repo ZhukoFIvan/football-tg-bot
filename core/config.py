@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     API_PUBLIC_URL: str = "http://localhost:8000"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
+    FRONTEND_URL: str = ""  # URL веб-приложения для кнопки в боте
 
     # App
     DEBUG: bool = False
