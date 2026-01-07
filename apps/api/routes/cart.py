@@ -445,13 +445,19 @@ async def create_payment(
     final_amount = total_after_promo - bonus_discount
     final_amount = max(Decimal(0), final_amount)
 
+    # Рассчитать начисление бонусов
+    earned_bonuses = await BonusSystem.calculate_earned_bonuses(final_amount, current_user)
+
     # Создать заказ
     order = Order(
         user_id=current_user.id,
         promo_code_id=promo_code_id,
         promo_discount=promo_discount,
         status="pending",
-        total_amount=final_amount,
+        total_amount=total_amount,  # Исходная сумма
+        bonus_used=bonus_used,  # Использовано бонусов
+        bonus_earned=earned_bonuses,  # Начислено бонусов
+        final_amount=final_amount,  # Итоговая сумма к оплате
         currency="RUB"
     )
     db.add(order)
@@ -480,8 +486,6 @@ async def create_payment(
             description=f"Списание бонусов за заказ #{order.id}"
         )
         db.add(bonus_spent_tx)
-    
-    earned_bonuses = await BonusSystem.calculate_earned_bonuses(final_amount, current_user)
     
     if earned_bonuses > 0:
         current_user.bonus_balance += earned_bonuses
