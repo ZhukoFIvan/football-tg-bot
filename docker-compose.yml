@@ -33,6 +33,7 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
+      - uploads_data:/app/uploads
     networks:
       - tg_shop_network
     restart: unless-stopped
@@ -49,12 +50,14 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
+      - uploads_data:/app/uploads
     networks:
       - tg_shop_network
     restart: unless-stopped
 
 volumes:
   postgres_data:
+  uploads_data:
 
 networks:
   tg_shop_network:

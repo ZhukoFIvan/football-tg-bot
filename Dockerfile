@@ -18,7 +18,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Создание непривилегированного пользователя
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/uploads && \
+    chown -R appuser:appuser /app && \
+    chmod -R 755 /app/uploads
 USER appuser
 
 # По умолчанию запускаем API (можно переопределить в docker-compose)
