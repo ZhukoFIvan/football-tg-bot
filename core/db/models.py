@@ -198,8 +198,11 @@ class Order(Base):
         "promo_codes.id", ondelete="SET NULL"), nullable=True)
     # pending, paid, completed, cancelled
     status = Column(String(50), default="pending", nullable=False)
-    total_amount = Column(Numeric(10, 2), nullable=False)
+    total_amount = Column(Numeric(10, 2), nullable=False)  # Исходная сумма до скидок
     promo_discount = Column(Numeric(10, 2), default=0, nullable=False)  # Скидка от промокода
+    bonus_used = Column(Integer, default=0, nullable=False)  # Использовано бонусов
+    bonus_earned = Column(Integer, default=0, nullable=False)  # Начислено бонусов
+    final_amount = Column(Numeric(10, 2), nullable=False)  # Итоговая сумма к оплате
     currency = Column(String(10), default="RUB", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow,
