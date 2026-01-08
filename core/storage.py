@@ -42,6 +42,12 @@ async def save_upload_file(file: UploadFile, subfolder: str = "") -> str:
     target_dir = UPLOAD_DIR / subfolder if subfolder else UPLOAD_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    # Установить права доступа на директорию (0o755 = rwxr-xr-x)
+    try:
+        os.chmod(target_dir, 0o755)
+    except Exception:
+        pass  # Игнорируем ошибки, если нет прав на изменение
+
     # Генерировать уникальное имя файла
     unique_filename = f"{uuid.uuid4()}{file_ext}"
     file_path = target_dir / unique_filename
@@ -56,8 +62,18 @@ async def save_upload_file(file: UploadFile, subfolder: str = "") -> str:
             detail=f"File too large. Max size: {MAX_FILE_SIZE / 1024 / 1024}MB"
         )
 
-    with open(file_path, "wb") as f:
-        f.write(content)
+    try:
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        # Установить права доступа на файл (0o644 = rw-r--r--)
+        os.chmod(file_path, 0o644)
+    except PermissionError as e:
+        # Если не удалось создать файл из-за прав доступа, попробуем другой подход
+        raise HTTPException(
+            status_code=500,
+            detail=f"Permission denied when saving file. Please check directory permissions: {str(e)}"
+        )
 
     # Вернуть относительный путь (для сохранения в БД)
     relative_path = str(file_path.relative_to(UPLOAD_DIR.parent))

@@ -106,6 +106,7 @@ class Product(Base):
     currency = Column(String(10), default="RUB", nullable=False)
     stock_count = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    is_priority = Column(Boolean, default=False, nullable=False)  # Приоритетный товар
     # Средний рейтинг (вычисляется из отзывов)
     average_rating = Column(Numeric(3, 2), default=0, nullable=False)
     # Количество отзывов

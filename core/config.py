@@ -55,7 +55,9 @@ class Settings(BaseSettings):
         """Парсинг OWNER_TG_IDS в список int"""
         if not self.OWNER_TG_IDS:
             return []
-        return [int(x.strip()) for x in self.OWNER_TG_IDS.split(",") if x.strip()]
+        # Поддержка как запятых, так и точек с запятой в качестве разделителей
+        ids_str = self.OWNER_TG_IDS.replace(";", ",")
+        return [int(x.strip()) for x in ids_str.split(",") if x.strip()]
 
 
 # Глобальный инстанс настроек

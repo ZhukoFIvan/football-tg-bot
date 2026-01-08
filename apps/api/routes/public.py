@@ -96,6 +96,7 @@ class ProductResponse(BaseModel):
     currency: str
     stock_count: int
     is_active: bool
+    is_priority: bool
     badge: Optional[BadgeResponse] = None  # Один бейдж
 
     class Config:
@@ -126,6 +127,7 @@ class ProductResponse(BaseModel):
             currency=obj.currency,
             stock_count=obj.stock_count,
             is_active=obj.is_active,
+            is_priority=obj.is_priority,
             badge=BadgeResponse.from_orm(obj.badge) if obj.badge else None
         )
 
@@ -208,7 +210,7 @@ async def get_main_screen_categories(
             select(Product)
             .where(Product.category_id == category.id, Product.is_active == True)
             .options(selectinload(Product.badge))
-            .order_by(Product.created_at.desc())
+            .order_by(Product.is_priority.desc(), Product.created_at.desc())
             .limit(limit_per_category)
         )
         products = products_result.scalars().all()
@@ -257,7 +259,7 @@ async def get_products(
     if section_id is not None:
         query = query.where(Product.section_id == section_id)
 
-    query = query.order_by(Product.id.desc()).limit(limit).offset(offset)
+    query = query.order_by(Product.is_priority.desc(), Product.id.desc()).limit(limit).offset(offset)
 
     result = await db.execute(query)
     products = result.scalars().all()

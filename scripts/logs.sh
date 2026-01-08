@@ -11,4 +11,3 @@ echo ""
 echo "Для выхода нажмите Ctrl+C"
 echo ""
 
-docker compose logs -f --tail=100
