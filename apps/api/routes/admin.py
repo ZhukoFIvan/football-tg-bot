@@ -70,6 +70,7 @@ class ProductCreate(BaseModel):
     currency: str = "RUB"
     stock_count: int = 0
     is_active: bool = True
+    is_priority: bool = False
 
 
 class ProductUpdate(BaseModel):
@@ -85,6 +86,7 @@ class ProductUpdate(BaseModel):
     currency: Optional[str] = None
     stock_count: Optional[int] = None
     is_active: Optional[bool] = None
+    is_priority: Optional[bool] = None
 
 
 class BadgeCreate(BaseModel):
@@ -403,7 +405,7 @@ async def admin_get_products(
     if category_id is not None:
         query = query.where(Product.category_id == category_id)
 
-    query = query.order_by(Product.id.desc()).limit(limit).offset(offset)
+    query = query.order_by(Product.is_priority.desc(), Product.id.desc()).limit(limit).offset(offset)
 
     result = await db.execute(query)
     return result.scalars().all()
