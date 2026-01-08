@@ -127,6 +127,7 @@ class ProductResponse(BaseModel):
             currency=obj.currency,
             stock_count=obj.stock_count,
             is_active=obj.is_active,
+            is_priority=obj.is_priority,
             badge=BadgeResponse.from_orm(obj.badge) if obj.badge else None
         )
 
