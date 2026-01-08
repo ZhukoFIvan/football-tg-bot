@@ -425,7 +425,7 @@ async def create_payment(
 
     total_after_promo = total_amount - promo_discount
 
-    # Применить бонусы
+    # Рассчитать применение бонусов (но НЕ списывать их сейчас!)
     bonus_used = 0
     bonus_discount = Decimal(0)
     
@@ -440,7 +440,7 @@ async def create_payment(
             bonus_used = max_bonus
         
         bonus_discount = Decimal(bonus_used * BonusSystem.BONUS_TO_RUBLE)
-        current_user.bonus_balance -= bonus_used
+        # НЕ списываем бонусы здесь! Они спишутся после успешной оплаты в webhook
 
     final_amount = total_after_promo - bonus_discount
     final_amount = max(Decimal(0), final_amount)
@@ -476,30 +476,8 @@ async def create_payment(
         product = cart_item.product
         product.stock_count -= cart_item.quantity
 
-    # Бонусные транзакции
-    if bonus_used > 0:
-        bonus_spent_tx = BonusTransaction(
-            user_id=current_user.id,
-            order_id=order.id,
-            amount=-bonus_used,
-            type="spent",
-            description=f"Списание бонусов за заказ #{order.id}"
-        )
-        db.add(bonus_spent_tx)
-    
-    if earned_bonuses > 0:
-        current_user.bonus_balance += earned_bonuses
-        bonus_earned_tx = BonusTransaction(
-            user_id=current_user.id,
-            order_id=order.id,
-            amount=earned_bonuses,
-            type="earned",
-            description=f"Начисление бонусов за заказ #{order.id}"
-        )
-        db.add(bonus_earned_tx)
-    
-    current_user.total_spent += final_amount
-    current_user.total_orders += 1
+    # НЕ создаем бонусные транзакции и НЕ обновляем статистику здесь!
+    # Это будет сделано в webhook после успешной оплаты
 
     # Очистить корзину
     for cart_item in cart.items:

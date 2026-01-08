@@ -11,7 +11,7 @@ from decimal import Decimal
 from datetime import datetime
 
 from core.db.session import get_db
-from core.db.models import Payment, Order, User, OrderItem
+from core.db.models import Payment, Order, User, OrderItem, BonusTransaction
 from core.config import settings
 from core.payments.freekassa import FreeKassaProvider
 from core.payments.paypalych import PaypalychProvider
@@ -96,11 +96,11 @@ async def update_payment_status(
     elif status == "cancelled":
         payment.cancelled_at = datetime.utcnow()
     
-    # Обновить статус заказа
+    # Обновить статус заказа и обработать бонусы
     order_result = await db.execute(
         select(Order)
         .where(Order.id == payment.order_id)
-        .options(selectinload(Order.items).selectinload(OrderItem.product))
+        .options(selectinload(Order.items).selectinload(OrderItem.product), selectinload(Order.user))
     )
     order = order_result.scalar_one_or_none()
     
@@ -108,10 +108,48 @@ async def update_payment_status(
         if status == "success":
             if order.status == "pending":
                 order.status = "paid"
-        elif status == "cancelled":
+                
+                # Списать бонусы пользователя (если были использованы)
+                if order.bonus_used > 0:
+                    user = order.user
+                    if user:
+                        user.bonus_balance -= order.bonus_used
+                        # Создать транзакцию списания
+                        bonus_spent_tx = BonusTransaction(
+                            user_id=user.id,
+                            order_id=order.id,
+                            amount=-order.bonus_used,
+                            type="spent",
+                            description=f"Списание бонусов за заказ #{order.id}"
+                        )
+                        db.add(bonus_spent_tx)
+                
+                # Начислить заработанные бонусы
+                if order.bonus_earned > 0:
+                    user = order.user
+                    if user:
+                        user.bonus_balance += order.bonus_earned
+                        # Создать транзакцию начисления
+                        bonus_earned_tx = BonusTransaction(
+                            user_id=user.id,
+                            order_id=order.id,
+                            amount=order.bonus_earned,
+                            type="earned",
+                            description=f"Начисление бонусов за заказ #{order.id}"
+                        )
+                        db.add(bonus_earned_tx)
+                
+                # Обновить статистику пользователя
+                user = order.user
+                if user:
+                    user.total_spent += order.final_amount
+                    user.total_orders += 1
+                    
+        elif status == "cancelled" or status == "failed":
             if order.status == "pending":
                 order.status = "cancelled"
                 # Вернуть товары на склад
+                # ВАЖНО: Бонусы НЕ списываем и НЕ начисляем при неудачной оплате!
                 from core.db.models import OrderItem
                 order_items_result = await db.execute(
                     select(OrderItem).where(OrderItem.order_id == order.id)
