@@ -139,11 +139,11 @@ async def update_payment_status(
                         )
                         db.add(bonus_earned_tx)
                 
-                # Обновить статистику пользователя
+                # Обновить статистику пользователя (только при успешной оплате!)
                 user = order.user
                 if user:
-                    user.total_spent += order.final_amount
-                    user.total_orders += 1
+                    user.total_spent += order.final_amount  # Добавляем к "всего потрачено"
+                    user.total_orders += 1  # Увеличиваем счетчик заказов
                     
         elif status == "cancelled" or status == "failed":
             if order.status == "pending":
