@@ -525,6 +525,13 @@ async def create_payment(
     else:
         raise HTTPException(status_code=400, detail="Invalid provider")
 
+    # Проверка минимальной суммы для Paypalych
+    if request.provider == "paypalych" and final_amount < 10:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Минимальная сумма платежа для Paypalych — 10 RUB. Текущая сумма: {final_amount} RUB. Пожалуйста, добавьте товары в корзину."
+        )
+
     # Создать платеж
     payment_data = await provider.create_payment(
         order_id=order.id,
