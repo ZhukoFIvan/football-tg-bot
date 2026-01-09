@@ -41,6 +41,7 @@ class Settings(BaseSettings):
 
     # Payment Providers - PayPaly
     PAYPALYCH_API_KEY: str = ""  # API ключ Paypalych (формат: merchant_id|api_key)
+    PAYPALYCH_SHOP_ID: str = ""  # Shop ID магазина в Paypalych (можно найти в настройках магазина)
 
     model_config = SettingsConfigDict(
         env_file=".env",

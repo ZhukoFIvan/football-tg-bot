@@ -506,8 +506,15 @@ async def create_payment(
                 status_code=500,
                 detail="PayPaly is not configured. Please set PAYPALYCH_API_KEY"
             )
+        if not settings.PAYPALYCH_SHOP_ID:
+            raise HTTPException(
+                status_code=500,
+                detail="PayPaly shop_id is not configured. Please set PAYPALYCH_SHOP_ID in .env file. "
+                       "You can find shop_id in your Paypalych merchant dashboard settings."
+            )
         provider = PaypalychProvider(
-            api_key=settings.PAYPALYCH_API_KEY
+            api_key=settings.PAYPALYCH_API_KEY,
+            shop_id=settings.PAYPALYCH_SHOP_ID
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid provider")

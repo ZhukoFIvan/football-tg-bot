@@ -17,18 +17,20 @@ logger = logging.getLogger(__name__)
 class PaypalychProvider(PaymentProvider):
     """Провайдер оплаты через PayPaly"""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, shop_id: str):
         self.api_key = api_key
         # API URL для Paypalych (pal24.pro)
         self.api_url = "https://pal24.pro"
         
-        # Извлекаем shop_id из API ключа (формат: merchant_id|api_key)
-        # shop_id - это первая часть до |
-        if "|" in api_key:
-            self.shop_id = api_key.split("|")[0]
-        else:
-            # Если формат другой, используем весь ключ
-            self.shop_id = api_key 
+        # shop_id - это отдельный параметр из настроек магазина Paypalych
+        # Его можно найти в личном кабинете Paypalych в настройках магазина
+        if not shop_id:
+            raise ValueError(
+                "shop_id is required for Paypalych. "
+                "Please set PAYPALYCH_SHOP_ID in .env file. "
+                "You can find shop_id in your Paypalych merchant dashboard settings."
+            )
+        self.shop_id = shop_id 
 
     async def create_payment(
         self,
