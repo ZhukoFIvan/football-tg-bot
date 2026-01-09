@@ -70,6 +70,59 @@ async def send_telegram_notification(
         logger.error(f"Ошибка при отправке уведомления пользователю {telegram_id}: {e}")
 
 
+async def notify_admins_about_purchase(
+    user: User,
+    order: Order,
+    order_items: list
+):
+    """
+    Отправить уведомление админам о новой покупке
+    
+    Args:
+        user: Объект пользователя
+        order: Объект заказа
+        order_items: Список товаров в заказе
+    """
+    admin_ids = settings.owner_ids
+    if not admin_ids:
+        logger.warning("OWNER_TG_IDS не задан - уведомления админам не отправлены")
+        return
+    
+    # Формируем список товаров
+    items_text = "\n".join([
+        f"  • {item.product_title} x{item.quantity} = {float(item.price * item.quantity):,.2f} ₽"
+        for item in order_items
+    ])
+    
+    message = f"""
+🎉 <b>Новая покупка!</b>
+
+👤 <b>Пользователь:</b>
+   • ID: <code>{user.id}</code>
+   • Telegram ID: <code>{user.telegram_id}</code>
+   • Username: @{user.username if user.username else 'не указан'}
+   • Имя: {user.first_name} {user.last_name or ''}
+
+📦 <b>Заказ #{order.id}</b>
+{items_text}
+
+💰 <b>Сумма заказа:</b> {float(order.final_amount):,.2f} ₽
+💳 <b>Способ оплаты:</b> {order.payment_method}
+🎁 <b>Бонусы использовано:</b> {float(order.bonus_used):,.2f} ₽
+✨ <b>Бонусы начислено:</b> {float(order.bonus_earned):,.2f} ₽
+
+⏰ <b>Дата:</b> {datetime.utcnow().strftime('%d.%m.%Y %H:%M UTC')}
+"""
+    
+    # Отправляем всем админам
+    for admin_id in admin_ids:
+        try:
+            await send_telegram_notification(admin_id, message)
+            logger.info(f"Уведомление о заказе #{order.id} отправлено админу {admin_id}")
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
+
+
 async def update_payment_status(
     payment: Payment,
     status: str,
@@ -145,6 +198,10 @@ async def update_payment_status(
                 if user:
                     user.total_spent += order.final_amount  # Добавляем к "всего потрачено"
                     user.total_orders += 1  # Увеличиваем счетчик заказов
+                
+                # Отправить уведомление админам о покупке
+                if user and order.items:
+                    await notify_admins_about_purchase(user, order, order.items)
                     
         elif status == "cancelled" or status == "failed":
             if order.status == "pending":

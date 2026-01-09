@@ -62,8 +62,7 @@ class UpdateCartItemRequest(BaseModel):
 
 class CreatePaymentRequest(BaseModel):
     """Создать платеж для корзины"""
-    provider: str  # "freekassa" или "paypalych"
-    payment_method: str  # "card" для карты, "sbp" для СБП
+    payment_method: str  # "card" для карты, "sbp" для СБП (провайдер выбирается автоматически)
     promo_code: str | None = None
     bonus_to_use: int = 0
 
@@ -496,18 +495,10 @@ async def create_payment(
     else:
         description = f"Заказ #{order.id} - {', '.join(product_titles[:2])} и еще {len(product_titles) - 2} товар(ов)"
     
-    if request.provider == "freekassa":
-        if not settings.FREEKASSA_MERCHANT_ID or not settings.FREEKASSA_SECRET_KEY or not settings.FREEKASSA_SECRET_KEY2:
-            raise HTTPException(
-                status_code=500,
-                detail="FreeKassa is not configured. Please set FREEKASSA_MERCHANT_ID, FREEKASSA_SECRET_KEY and FREEKASSA_SECRET_KEY2"
-            )
-        provider = FreeKassaProvider(
-            merchant_id=settings.FREEKASSA_MERCHANT_ID,
-            secret_key=settings.FREEKASSA_SECRET_KEY,
-            secret_key2=settings.FREEKASSA_SECRET_KEY2
-        )
-    elif request.provider == "paypalych":
+    # Автоматический выбор провайдера на основе способа оплаты
+    # СБП → Paypalych, Карта → FreeKassa
+    if request.payment_method == "sbp":
+        provider_name = "paypalych"
         if not settings.PAYPALYCH_API_KEY:
             raise HTTPException(
                 status_code=500,
@@ -522,14 +513,29 @@ async def create_payment(
             api_key=settings.PAYPALYCH_API_KEY,
             shop_id=settings.PAYPALYCH_SHOP_ID
         )
+        
+        # Проверка минимальной суммы для Paypalych
+        if final_amount < 10:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Минимальная сумма платежа для СБП — 10 RUB. Текущая сумма: {final_amount} RUB. Пожалуйста, добавьте товары в корзину."
+            )
+    elif request.payment_method == "card":
+        provider_name = "freekassa"
+        if not settings.FREEKASSA_MERCHANT_ID or not settings.FREEKASSA_SECRET_KEY or not settings.FREEKASSA_SECRET_KEY2:
+            raise HTTPException(
+                status_code=500,
+                detail="FreeKassa is not configured. Please set FREEKASSA_MERCHANT_ID, FREEKASSA_SECRET_KEY and FREEKASSA_SECRET_KEY2"
+            )
+        provider = FreeKassaProvider(
+            merchant_id=settings.FREEKASSA_MERCHANT_ID,
+            secret_key=settings.FREEKASSA_SECRET_KEY,
+            secret_key2=settings.FREEKASSA_SECRET_KEY2
+        )
     else:
-        raise HTTPException(status_code=400, detail="Invalid provider")
-
-    # Проверка минимальной суммы для Paypalych
-    if request.provider == "paypalych" and final_amount < 10:
         raise HTTPException(
             status_code=400,
-            detail=f"Минимальная сумма платежа для Paypalych — 10 RUB. Текущая сумма: {final_amount} RUB. Пожалуйста, добавьте товары в корзину."
+            detail=f"Неверный способ оплаты: {request.payment_method}. Доступны: 'card' (карта) или 'sbp' (СБП)"
         )
 
     # Создать платеж
@@ -547,7 +553,7 @@ async def create_payment(
         order_id=order.id,
         user_id=current_user.id,
         payment_id=payment_data["payment_id"],
-        provider=request.provider,
+        provider=provider_name,
         payment_method=request.payment_method,
         amount=final_amount,
         currency="RUB",
