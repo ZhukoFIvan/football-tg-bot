@@ -17,23 +17,27 @@ logger = logging.getLogger(__name__)
 class PaypalychProvider(PaymentProvider):
     """Провайдер оплаты через PayPaly"""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, shop_id: str):
         self.api_key = api_key
+        self.shop_id = shop_id
         # API URL для Paypalych (pal24.pro)
         self.api_url = "https://pal24.pro"
         
-        # Извлекаем shop_id из API ключа (формат: merchant_id|api_key)
-        # shop_id = merchant_id (первая часть до |)
-        # Пример из документации: 72|oBCB7Z3SmUm1gvkpEdRcSR2q1ERHpG4vD3DNBmuT
-        if "|" in api_key:
-            parts = api_key.split("|", 1)  # Разделяем только по первому |
-            self.shop_id = parts[0]  # Используем merchant_id как shop_id
-            logger.info(f"Extracted shop_id from API key: {self.shop_id}")
-        else:
+        # Проверяем формат API ключа
+        if "|" not in api_key:
             raise ValueError(
                 "API key format is incorrect. "
                 "Expected format: merchant_id|api_key (e.g., 72|oBCB7Z3SmUm1gvkpEdRcSR2q1ERHpG4vD3DNBmuT)"
             )
+        
+        # Проверяем наличие shop_id
+        if not shop_id:
+            raise ValueError(
+                "shop_id is required. Please set PAYPALYCH_SHOP_ID in your .env file. "
+                "You can find shop_id in your Paypalych merchant dashboard (e.g., 'G1vrEyX0LR')"
+            )
+        
+        logger.info(f"PaypalychProvider initialized with shop_id: {self.shop_id}")
     
     async def verify_api_token(self) -> bool:
         """
@@ -81,12 +85,12 @@ class PaypalychProvider(PaymentProvider):
         Args:
             payment_method: "card" для оплаты картой, "sbp" для СБП (не используется в API, но оставлено для совместимости)
         """
-        # Сначала проверяем правильность API токена
-        logger.info("Verifying Paypalych API token...")
+        # Проверяем формат API токена (проверка валидности будет при реальном запросе)
+        logger.info("Verifying Paypalych API token format...")
         token_valid = await self.verify_api_token()
         if not token_valid:
             raise Exception(
-                "Paypalych API token is invalid. "
+                "Paypalych API token format is invalid. "
                 "Please check your PAYPALYCH_API_KEY in .env file. "
                 "Expected format: merchant_id|api_key"
             )
@@ -123,7 +127,12 @@ class PaypalychProvider(PaymentProvider):
                     f"Creating Paypalych payment:\n"
                     f"  URL: {invoice_url}\n"
                     f"  Authorization: Bearer {api_key_preview}\n"
-                    f"  Form data: amount={amount}, order_id={order_id}, shop_id={self.shop_id}"
+                    f"  Form data:\n"
+                    f"    - amount: {amount} (type: {type(amount).__name__})\n"
+                    f"    - order_id: {order_id} (type: {type(order_id).__name__})\n"
+                    f"    - shop_id: '{self.shop_id}' (type: {type(self.shop_id).__name__})\n"
+                    f"    - description: {description}\n"
+                    f"    - currency_in: {currency.upper()}"
                 )
                 
                 async with session.post(
@@ -162,16 +171,36 @@ class PaypalychProvider(PaymentProvider):
                             f"Request data: shop_id={self.shop_id}, amount={amount}, order_id={order_id}"
                         )
                         
+                        # Если ошибка авторизации (401 или Unauthenticated)
+                        if response.status == 401 or "Unauthenticated" in error_text or "unauthorized" in error_text.lower():
+                            raise Exception(
+                                f"❌ Paypalych API: Ошибка авторизации (токен неверный).\n\n"
+                                f"📋 ЧТО ПРОВЕРИТЬ:\n\n"
+                                f"1️⃣ API токен в .env файле:\n"
+                                f"   • Формат: merchant_id|api_key\n"
+                                f"   • Пример: 25389|eAKBRDawd2bpo2BQHUGh9elf8DIKU8HPirHcSOGg\n"
+                                f"   • Проверьте, что токен скопирован полностью, без пробелов\n\n"
+                                f"2️⃣ Создайте новый токен в личном кабинете Paypalych\n\n"
+                                f"3️⃣ Убедитесь, что токен активен и имеет права на создание платежей\n\n"
+                                f"Ошибка от API: {error_text}"
+                            )
+                        
                         # Если shop_id не найден, даем понятное сообщение
                         if response.status == 422 and "shop_not_found" in error_text:
                             raise Exception(
-                                f"Paypalych API error: shop_id '{self.shop_id}' not found. "
-                                f"This shop_id was extracted from your API token (merchant_id part). "
-                                f"Please contact Paypalych support to:\n"
-                                f"1. Verify your API token is correct\n"
-                                f"2. Get the correct shop_id for your account\n"
-                                f"3. Confirm if shop_id should match merchant_id from token\n"
-                                f"Original error: {error_text}"
+                                f"❌ Paypalych API: shop_id '{self.shop_id}' не найден.\n\n"
+                                f"📋 ЧТО НУЖНО СДЕЛАТЬ:\n\n"
+                                f"1️⃣ Найдите ПРАВИЛЬНЫЙ shop_id в личном кабинете Paypalych:\n"
+                                f"   • Откройте https://pally.info (или ваш кабинет)\n"
+                                f"   • Раздел 'Магазины' → 'API интеграция'\n"
+                                f"   • Найдите поле 'shop_id' (это СТРОКА, например: 'G1vrEyX0LR')\n"
+                                f"   • ⚠️ shop_id ≠ merchant_id (25389) - это разные значения!\n\n"
+                                f"2️⃣ Добавьте в .env файл:\n"
+                                f"   PAYPALYCH_SHOP_ID=ваш_shop_id_из_кабинета\n\n"
+                                f"3️⃣ Перезапустите сервер:\n"
+                                f"   docker-compose restart tg_shop_api\n\n"
+                                f"💡 ВАЖНО: В документации shop_id выглядит как 'G1vrEyX0LR', а не как число!\n\n"
+                                f"Ошибка от API: {error_text}"
                             )
                         
                         raise Exception(f"Paypalych API error {response.status}: {error_text}")

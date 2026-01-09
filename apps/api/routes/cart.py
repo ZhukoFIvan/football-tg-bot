@@ -507,15 +507,21 @@ async def create_payment(
             secret_key=settings.FREEKASSA_SECRET_KEY,
             secret_key2=settings.FREEKASSA_SECRET_KEY2
         )
-    elif request.provider == "paypalych":
-        if not settings.PAYPALYCH_API_KEY:
-            raise HTTPException(
-                status_code=500,
-                detail="PayPaly is not configured. Please set PAYPALYCH_API_KEY"
+        elif request.provider == "paypalych":
+            if not settings.PAYPALYCH_API_KEY:
+                raise HTTPException(
+                    status_code=500,
+                    detail="PayPaly is not configured. Please set PAYPALYCH_API_KEY"
+                )
+            if not settings.PAYPALYCH_SHOP_ID:
+                raise HTTPException(
+                    status_code=500,
+                    detail="PayPaly is not configured. Please set PAYPALYCH_SHOP_ID in .env (find it in your Paypalych dashboard)"
+                )
+            provider = PaypalychProvider(
+                api_key=settings.PAYPALYCH_API_KEY,
+                shop_id=settings.PAYPALYCH_SHOP_ID
             )
-        provider = PaypalychProvider(
-            api_key=settings.PAYPALYCH_API_KEY
-        )
     else:
         raise HTTPException(status_code=400, detail="Invalid provider")
 
