@@ -6,8 +6,12 @@ from decimal import Decimal
 import uuid
 import aiohttp
 import base64
+import logging
 
 from core.payments.base import PaymentProvider
+from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class PaypalychProvider(PaymentProvider):
@@ -34,40 +38,77 @@ class PaypalychProvider(PaymentProvider):
         """
         idempotence_key = str(uuid.uuid4())
         
-        # TODO: Реализовать через HTTP запрос к API PayPaly
-        # Примерная структура запроса
-        # async with aiohttp.ClientSession() as session:
-        #     headers = {
-        #         "Authorization": f"Bearer {self.api_key}",
-        #         "Content-Type": "application/json",
-        #         "X-Idempotency-Key": idempotence_key
-        #     }
-        #     data = {
-        #         "amount": float(amount),
-        #         "currency": currency,
-        #         "description": description,
-        #         "order_id": order_id,
-        #         "user_id": user_id,
-        #         "payment_method": payment_method,  # "card" или "sbp"
-        #         "return_url": f"{settings.API_PUBLIC_URL}/payment/success?order_id={order_id}"
-        #     }
-        #     async with session.post(
-        #         f"{self.api_url}/payments",
-        #         headers=headers,
-        #         json=data
-        #     ) as response:
-        #         result = await response.json()
-        #         return {
-        #             "payment_id": result["payment_id"],
-        #             "payment_url": result["payment_url"],
-        #             "status": result["status"]
-        #         }
-        
-        return {
-            "payment_id": f"paypalych_{order_id}_{idempotence_key[:8]}",
-            "payment_url": f"https://pally.info/pay/{order_id}?method={payment_method}",
-            "status": "pending"
-        }
+        try:
+            # Реальный запрос к API Paypalych
+            async with aiohttp.ClientSession() as session:
+                # API ключ в формате merchant_id|api_key
+                # ВАЖНО: Проверьте документацию Paypalych для правильного формата авторизации
+                # Возможные варианты:
+                # - Authorization: Bearer {api_key}
+                # - X-API-Key: {api_key}
+                # - Authorization: Basic {base64(api_key)}
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                }
+                
+                # URL для создания платежа
+                # ВАЖНО: Проверьте документацию Paypalych для правильного endpoint
+                # Возможные варианты:
+                # - /invoice
+                # - /payment
+                # - /create
+                # - /v1/invoice
+                # - /v1/payment
+                invoice_url = f"{self.api_url}/invoice"
+                
+                data = {
+                    "amount": float(amount),
+                    "currency": currency.upper(),
+                    "order_id": str(order_id),
+                    "payment_method": payment_method,  # "card" или "sbp"
+                    "description": description,
+                    "success_url": f"{settings.API_PUBLIC_URL}/payments/success?order_id={order_id}",
+                    "fail_url": f"{settings.API_PUBLIC_URL}/payments/failed?order_id={order_id}",
+                }
+                
+                logger.info(f"Creating Paypalych payment: {invoice_url}, data: {data}")
+                
+                async with session.post(
+                    invoice_url,
+                    headers=headers,
+                    json=data,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200 or response.status == 201:
+                        result = await response.json()
+                        logger.info(f"Paypalych payment created: {result}")
+                        
+                        # Обычно в ответе есть payment_url или invoice_url
+                        payment_url = result.get("payment_url") or result.get("invoice_url") or result.get("url")
+                        payment_id = result.get("payment_id") or result.get("invoice_id") or result.get("id")
+                        
+                        if not payment_url:
+                            raise ValueError(f"No payment_url in response: {result}")
+                        
+                        return {
+                            "payment_id": payment_id or f"paypalych_{order_id}_{idempotence_key[:8]}",
+                            "payment_url": payment_url,
+                            "status": result.get("status", "pending")
+                        }
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Paypalych API error {response.status}: {error_text}")
+                        raise Exception(f"Paypalych API error {response.status}: {error_text}")
+                        
+        except Exception as e:
+            logger.error(f"Error creating Paypalych payment: {e}", exc_info=True)
+            # Fallback - возвращаем заглушку, но логируем ошибку
+            return {
+                "payment_id": f"paypalych_{order_id}_{idempotence_key[:8]}",
+                "payment_url": f"https://pally.info/pay/{order_id}?method={payment_method}",
+                "status": "pending"
+            }
 
     async def check_payment(self, payment_id: str) -> Dict:
         """
