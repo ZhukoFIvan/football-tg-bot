@@ -333,16 +333,11 @@ async def create_payment(
     """
     Создать платеж для корзины
     
-    Сначала создает заказ из корзины, затем создает платеж через выбранный провайдер.
-    Поддерживает оплату через FreeKassa и PayPalych по карте и СБП.
+    Автоматически выбирает провайдера на основе способа оплаты:
+    - СБП → Paypalych
+    - Карта → FreeKassa
     """
-    # Валидация провайдера и метода оплаты
-    if request.provider not in ["freekassa", "paypalych"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid provider. Supported: freekassa, paypalych"
-        )
-    
+    # Валидация метода оплаты
     if request.payment_method not in ["card", "sbp"]:
         raise HTTPException(
             status_code=400,
