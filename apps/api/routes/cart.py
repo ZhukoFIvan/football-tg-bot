@@ -487,7 +487,14 @@ async def create_payment(
     await db.refresh(order)
 
     # Создать платеж через выбранный провайдер
-    description = f"Заказ #{order.id} - {len(order_items_data)} товар(ов)"
+    # Формируем описание с названиями товаров
+    product_titles = [item["product_title"] for item in order_items_data]
+    if len(product_titles) == 1:
+        description = f"Заказ #{order.id} - {product_titles[0]}"
+    elif len(product_titles) <= 3:
+        description = f"Заказ #{order.id} - {', '.join(product_titles)}"
+    else:
+        description = f"Заказ #{order.id} - {', '.join(product_titles[:2])} и еще {len(product_titles) - 2} товар(ов)"
     
     if request.provider == "freekassa":
         if not settings.FREEKASSA_MERCHANT_ID or not settings.FREEKASSA_SECRET_KEY or not settings.FREEKASSA_SECRET_KEY2:
@@ -506,10 +513,8 @@ async def create_payment(
                 status_code=500,
                 detail="PayPaly is not configured. Please set PAYPALYCH_API_KEY"
             )
-        # shop_id опционален - если не указан, будет использован merchant_id из API ключа
         provider = PaypalychProvider(
-            api_key=settings.PAYPALYCH_API_KEY,
-            shop_id=settings.PAYPALYCH_SHOP_ID if settings.PAYPALYCH_SHOP_ID else None
+            api_key=settings.PAYPALYCH_API_KEY
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid provider")

@@ -347,8 +347,7 @@ async def paypalych_webhook(
         # Проверить подпись (если требуется)
         if signature:
             provider = PaypalychProvider(
-                api_key=settings.PAYPALYCH_API_KEY,
-                shop_id=settings.PAYPALYCH_SHOP_ID
+                api_key=settings.PAYPALYCH_API_KEY
             )
             if not provider.verify_webhook_signature(order_id_str, amount_str, signature):
                 logger.error(f"Неверная подпись для платежа {payment.id}")

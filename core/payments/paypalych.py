@@ -17,43 +17,77 @@ logger = logging.getLogger(__name__)
 class PaypalychProvider(PaymentProvider):
     """Провайдер оплаты через PayPaly"""
 
-    def __init__(self, api_key: str, shop_id: str = None):
+    def __init__(self, api_key: str):
         self.api_key = api_key
         # API URL для Paypalych (pal24.pro)
         self.api_url = "https://pal24.pro"
         
-        # Извлекаем merchant_id из API ключа (формат: merchant_id|api_key)
+        # Извлекаем shop_id из API ключа (формат: merchant_id|api_key)
+        # shop_id = merchant_id (первая часть до |)
         # Пример из документации: 72|oBCB7Z3SmUm1gvkpEdRcSR2q1ERHpG4vD3DNBmuT
         if "|" in api_key:
             parts = api_key.split("|", 1)  # Разделяем только по первому |
-            self.merchant_id = parts[0]
-            logger.info(f"Extracted merchant_id from API key: {self.merchant_id}")
-        else:
-            self.merchant_id = None
-            logger.warning(
-                f"API key doesn't contain '|' separator. "
-                f"Expected format: merchant_id|api_key (e.g., 72|oBCB7Z3SmUm1gvkpEdRcSR2q1ERHpG4vD3DNBmuT)"
-            )
-        
-        # shop_id - это отдельный параметр из настроек магазина Paypalych
-        # В документации пример: shop_id="G1vrEyX0LR" (строка, не число!)
-        # Если не указан, пробуем использовать merchant_id из API ключа
-        if shop_id:
-            self.shop_id = str(shop_id).strip()  # Убеждаемся, что это строка без пробелов
-            logger.info(f"Using shop_id from config: {self.shop_id}")
-        elif self.merchant_id:
-            # Fallback: используем merchant_id из API ключа
-            logger.warning(
-                f"PAYPALYCH_SHOP_ID not set, using merchant_id from API key: {self.merchant_id}. "
-                f"If this doesn't work, please set PAYPALYCH_SHOP_ID in .env file."
-            )
-            self.shop_id = str(self.merchant_id)
+            self.shop_id = parts[0]  # Используем merchant_id как shop_id
+            logger.info(f"Extracted shop_id from API key: {self.shop_id}")
         else:
             raise ValueError(
-                "shop_id is required for Paypalych. "
-                "Please set PAYPALYCH_SHOP_ID in .env file, or ensure API key format is merchant_id|api_key. "
-                "You can find shop_id in your Paypalych merchant dashboard settings."
-            ) 
+                "API key format is incorrect. "
+                "Expected format: merchant_id|api_key (e.g., 72|oBCB7Z3SmUm1gvkpEdRcSR2q1ERHpG4vD3DNBmuT)"
+            )
+    
+    async def verify_api_token(self) -> bool:
+        """
+        Проверить правильность API токена перед созданием платежа
+        
+        Делает простой запрос к API для проверки авторизации
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                }
+                
+                # Простой запрос для проверки токена
+                # Используем тот же endpoint, но с минимальными данными для проверки
+                check_url = f"{self.api_url}/api/v1/bill/create"
+                
+                # Создаем минимальный form-data для проверки
+                data_form = aiohttp.FormData()
+                data_form.add_field("amount", "1")
+                data_form.add_field("order_id", "test_token_check")
+                data_form.add_field("description", "Token verification")
+                data_form.add_field("type", "normal")
+                data_form.add_field("shop_id", str(self.shop_id))
+                data_form.add_field("currency_in", "RUB")
+                data_form.add_field("custom", "token_check")
+                data_form.add_field("payer_pays_commission", "1")
+                data_form.add_field("name", "Проверка токена")
+                
+                async with session.post(
+                    check_url,
+                    headers=headers,
+                    data=data_form,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 401:
+                        logger.error(f"Paypalych API token is invalid (401 Unauthenticated)")
+                        return False
+                    elif response.status == 200 or response.status == 201:
+                        logger.info("Paypalych API token is valid")
+                        return True
+                    else:
+                        # Если не 401, значит токен валиден, но могут быть другие ошибки (например, shop_id)
+                        # Это нормально для проверки токена
+                        error_text = await response.text()
+                        if "Unauthenticated" in error_text or response.status == 401:
+                            logger.error(f"Paypalych API token is invalid: {error_text}")
+                            return False
+                        logger.info(f"Paypalych API token is valid (response status: {response.status})")
+                        return True
+        except Exception as e:
+            logger.error(f"Error verifying Paypalych API token: {e}", exc_info=True)
+            # При ошибке сети считаем, что токен может быть валиден
+            return True 
 
     async def create_payment(
         self,
@@ -70,6 +104,16 @@ class PaypalychProvider(PaymentProvider):
         Args:
             payment_method: "card" для оплаты картой, "sbp" для СБП (не используется в API, но оставлено для совместимости)
         """
+        # Сначала проверяем правильность API токена
+        logger.info("Verifying Paypalych API token...")
+        token_valid = await self.verify_api_token()
+        if not token_valid:
+            raise Exception(
+                "Paypalych API token is invalid. "
+                "Please check your PAYPALYCH_API_KEY in .env file. "
+                "Expected format: merchant_id|api_key"
+            )
+        
         try:
             # Реальный запрос к API Paypalych согласно документации
             # Endpoint: /api/v1/bill/create
@@ -97,18 +141,12 @@ class PaypalychProvider(PaymentProvider):
                 invoice_url = f"{self.api_url}/api/v1/bill/create"
                 
                 # Логируем все параметры для отладки
-                # ВАЖНО: Показываем, что токен используется как есть, без изменений
                 api_key_preview = f"{self.api_key[:10]}..." if len(self.api_key) > 10 else self.api_key
                 logger.info(
                     f"Creating Paypalych payment:\n"
                     f"  URL: {invoice_url}\n"
-                    f"  Authorization: Bearer {api_key_preview} (полный токен из .env, БЕЗ изменений)\n"
-                    f"  Form data:\n"
-                    f"    amount={amount}\n"
-                    f"    order_id={order_id}\n"
-                    f"    shop_id={self.shop_id} (отдельный параметр, НЕ часть токена)\n"
-                    f"    merchant_id из токена={self.merchant_id}\n"
-                    f"  ВАЖНО: Токен используется как есть ({self.api_key[:20]}...), shop_id передается отдельно"
+                    f"  Authorization: Bearer {api_key_preview}\n"
+                    f"  Form data: amount={amount}, order_id={order_id}, shop_id={self.shop_id}"
                 )
                 
                 async with session.post(
@@ -144,118 +182,8 @@ class PaypalychProvider(PaymentProvider):
                         error_text = await response.text()
                         logger.error(
                             f"Paypalych API error {response.status}: {error_text}. "
-                            f"Request data: shop_id={self.shop_id}, merchant_id={self.merchant_id}, "
-                            f"amount={amount}, order_id={order_id}"
+                            f"Request data: shop_id={self.shop_id}, amount={amount}, order_id={order_id}"
                         )
-                        
-                        # Если shop_id не найден, пробуем разные варианты
-                        if response.status == 422 and "shop_not_found" in error_text:
-                            retry_attempts = []
-                            
-                            # Вариант 1: Попробовать без shop_id (может быть он не обязателен)
-                            logger.warning(f"shop_id {self.shop_id} not found. Trying without shop_id...")
-                            data_form_no_shop = aiohttp.FormData()
-                            data_form_no_shop.add_field("amount", str(float(amount)))
-                            data_form_no_shop.add_field("order_id", str(order_id))
-                            data_form_no_shop.add_field("description", description)
-                            data_form_no_shop.add_field("type", "normal")
-                            # НЕ добавляем shop_id
-                            data_form_no_shop.add_field("currency_in", currency.upper())
-                            data_form_no_shop.add_field("custom", f"order_{order_id}_user_{user_id}")
-                            data_form_no_shop.add_field("payer_pays_commission", "1")
-                            data_form_no_shop.add_field("name", "Платёж")
-                            
-                            async with session.post(
-                                invoice_url,
-                                headers=headers,
-                                data=data_form_no_shop,
-                                timeout=aiohttp.ClientTimeout(total=30)
-                            ) as response_no_shop:
-                                if response_no_shop.status == 200 or response_no_shop.status == 201:
-                                    result = await response_no_shop.json()
-                                    logger.info(f"Paypalych payment created without shop_id: {result}")
-                                    
-                                    if result.get("success") != "true" and result.get("success") is not True:
-                                        error_msg = result.get("message", "Unknown error")
-                                        raise Exception(f"Paypalych API returned error: {error_msg}")
-                                    
-                                    payment_url = result.get("link_page_url") or result.get("link_url")
-                                    payment_id = result.get("bill_id")
-                                    
-                                    if not payment_url:
-                                        raise ValueError(f"No payment_url in response: {result}")
-                                    if not payment_id:
-                                        raise ValueError(f"No bill_id in response: {result}")
-                                    
-                                    return {
-                                        "payment_id": payment_id,
-                                        "payment_url": payment_url,
-                                        "status": "pending"
-                                    }
-                                else:
-                                    error_text_no_shop = await response_no_shop.text()
-                                    logger.warning(f"Request without shop_id failed: {error_text_no_shop}")
-                            
-                            # Вариант 2: Если есть merchant_id, попробовать его
-                            if self.merchant_id and str(self.shop_id) != str(self.merchant_id):
-                                logger.warning(
-                                    f"Trying merchant_id {self.merchant_id} from API key..."
-                                )
-                                data_form_merchant = aiohttp.FormData()
-                                data_form_merchant.add_field("amount", str(float(amount)))
-                                data_form_merchant.add_field("order_id", str(order_id))
-                                data_form_merchant.add_field("description", description)
-                                data_form_merchant.add_field("type", "normal")
-                                data_form_merchant.add_field("shop_id", str(self.merchant_id))
-                                data_form_merchant.add_field("currency_in", currency.upper())
-                                data_form_merchant.add_field("custom", f"order_{order_id}_user_{user_id}")
-                                data_form_merchant.add_field("payer_pays_commission", "1")
-                                data_form_merchant.add_field("name", "Платёж")
-                                
-                                async with session.post(
-                                    invoice_url,
-                                    headers=headers,
-                                    data=data_form_merchant,
-                                    timeout=aiohttp.ClientTimeout(total=30)
-                                ) as response_merchant:
-                                    if response_merchant.status == 200 or response_merchant.status == 201:
-                                        result = await response_merchant.json()
-                                        logger.info(f"Paypalych payment created with merchant_id: {result}")
-                                        
-                                        if result.get("success") != "true" and result.get("success") is not True:
-                                            error_msg = result.get("message", "Unknown error")
-                                            raise Exception(f"Paypalych API returned error: {error_msg}")
-                                        
-                                        payment_url = result.get("link_page_url") or result.get("link_url")
-                                        payment_id = result.get("bill_id")
-                                        
-                                        if not payment_url:
-                                            raise ValueError(f"No payment_url in response: {result}")
-                                        if not payment_id:
-                                            raise ValueError(f"No bill_id in response: {result}")
-                                        
-                                        # Обновляем shop_id для будущих запросов
-                                        self.shop_id = str(self.merchant_id)
-                                        
-                                        return {
-                                            "payment_id": payment_id,
-                                            "payment_url": payment_url,
-                                            "status": "pending"
-                                        }
-                                    else:
-                                        error_text_merchant = await response_merchant.text()
-                                        logger.warning(f"Request with merchant_id failed: {error_text_merchant}")
-                            
-                            # Если все попытки не удались, выбрасываем понятную ошибку
-                            raise Exception(
-                                f"Paypalych API error: shop_id '{self.shop_id}' not found. "
-                                f"Please check:\n"
-                                f"1. Is PAYPALYCH_SHOP_ID correct in your .env file?\n"
-                                f"2. Is your API key format correct (should be 'merchant_id|api_key')?\n"
-                                f"3. Contact Paypalych support to get the correct shop_id for your account.\n"
-                                f"Original error: {error_text}"
-                            )
-                        
                         raise Exception(f"Paypalych API error {response.status}: {error_text}")
                         
         except Exception as e:
