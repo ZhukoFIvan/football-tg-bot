@@ -20,7 +20,8 @@ class PaypalychProvider(PaymentProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
         # API URL для Paypalych (pal24.pro)
-        self.api_url = "https://pal24.pro/api" 
+        # Базовый URL без /api, так как endpoint'ы уже содержат путь
+        self.api_url = "https://pal24.pro" 
 
     async def create_payment(
         self,
@@ -49,13 +50,15 @@ class PaypalychProvider(PaymentProvider):
                 }
                 
                 # URL для создания платежа
-                # Пробуем разные варианты endpoint'ов (404 означает, что /api/invoice неверный)
+                # Пробуем разные варианты endpoint'ов
+                # ВАЖНО: Проверьте документацию Paypalych для правильного endpoint
                 endpoints_to_try = [
-                    "/api/payment",
-                    "/api/payment/create", 
-                    "/api/invoice/create",
-                    "/merchant/api/invoice",
+                    "/merchant/api/invoice",  # Попробуем сначала этот (судя по документации)
                     "/merchant/api/payment",
+                    "/api/invoice",
+                    "/api/payment",
+                    "/api/invoice/create",
+                    "/api/payment/create", 
                     "/api/v1/invoice",
                     "/api/v1/payment",
                     "/invoice",
