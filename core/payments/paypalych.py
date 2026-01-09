@@ -65,27 +65,41 @@ class PaypalychProvider(PaymentProvider):
                     "/payment",
                 ]
                 
-                data = {
-                    "amount": float(amount),
-                    "currency": currency.upper(),
-                    "order_id": str(order_id),
-                    "payment_method": payment_method,  # "card" или "sbp"
-                    "description": description,
-                    "success_url": f"{settings.API_PUBLIC_URL}/payments/success?order_id={order_id}",
-                    "fail_url": f"{settings.API_PUBLIC_URL}/payments/failed?order_id={order_id}",
-                }
-                
                 # Пробуем каждый endpoint до первого успешного
                 last_error = None
                 for endpoint in endpoints_to_try:
                     invoice_url = f"{self.api_url}{endpoint}"
-                    logger.info(f"Trying Paypalych endpoint: {invoice_url}, data: {data}")
+                    
+                    # Пробуем разные форматы данных
+                    # Вариант 1: JSON
+                    data_json = {
+                        "amount": float(amount),
+                        "currency": currency.upper(),
+                        "order_id": str(order_id),
+                        "payment_method": payment_method,  # "card" или "sbp"
+                        "description": description,
+                        "success_url": f"{settings.API_PUBLIC_URL}/payments/success?order_id={order_id}",
+                        "fail_url": f"{settings.API_PUBLIC_URL}/payments/failed?order_id={order_id}",
+                    }
+                    
+                    # Вариант 2: Form-data (как в примере curl)
+                    data_form = aiohttp.FormData()
+                    data_form.add_field("amount", str(float(amount)))
+                    data_form.add_field("currency", currency.upper())
+                    data_form.add_field("order_id", str(order_id))
+                    data_form.add_field("payment_method", payment_method)
+                    data_form.add_field("description", description)
+                    data_form.add_field("success_url", f"{settings.API_PUBLIC_URL}/payments/success?order_id={order_id}")
+                    data_form.add_field("fail_url", f"{settings.API_PUBLIC_URL}/payments/failed?order_id={order_id}")
+                    
+                    # Сначала пробуем JSON
+                    logger.info(f"Trying Paypalych endpoint: {invoice_url}, JSON data: {data_json}")
                     
                     try:
                         async with session.post(
                             invoice_url,
                             headers=headers,
-                            json=data,
+                            json=data_json,
                             timeout=aiohttp.ClientTimeout(total=30)
                         ) as response:
                             if response.status == 200 or response.status == 201:
@@ -104,6 +118,48 @@ class PaypalychProvider(PaymentProvider):
                                     "payment_url": payment_url,
                                     "status": result.get("status", "pending")
                                 }
+                            elif response.status == 400:
+                                # 400 может означать неправильный формат данных - пробуем form-data
+                                error_text = await response.text()
+                                logger.warning(f"Endpoint {endpoint} returned 400 with JSON, trying form-data: {error_text}")
+                                
+                                # Пробуем form-data для этого endpoint
+                                try:
+                                    headers_form = {
+                                        "Authorization": f"Bearer {self.api_key}",
+                                        # Не указываем Content-Type для form-data - aiohttp добавит сам
+                                    }
+                                    async with session.post(
+                                        invoice_url,
+                                        headers=headers_form,
+                                        data=data_form,
+                                        timeout=aiohttp.ClientTimeout(total=30)
+                                    ) as response_form:
+                                        if response_form.status == 200 or response_form.status == 201:
+                                            result = await response_form.json()
+                                            logger.info(f"Paypalych payment created via {endpoint} (form-data): {result}")
+                                            
+                                            payment_url = result.get("payment_url") or result.get("invoice_url") or result.get("url")
+                                            payment_id = result.get("payment_id") or result.get("invoice_id") or result.get("id")
+                                            
+                                            if not payment_url:
+                                                raise ValueError(f"No payment_url in response: {result}")
+                                            
+                                            return {
+                                                "payment_id": payment_id or f"paypalych_{order_id}_{idempotence_key[:8]}",
+                                                "payment_url": payment_url,
+                                                "status": result.get("status", "pending")
+                                            }
+                                        else:
+                                            error_text_form = await response_form.text()
+                                            logger.warning(f"Endpoint {endpoint} returned {response_form.status} with form-data: {error_text_form}")
+                                            last_error = f"{response_form.status}: {error_text_form}"
+                                            continue
+                                except Exception as e_form:
+                                    logger.warning(f"Error trying form-data on {endpoint}: {e_form}")
+                                    last_error = str(e_form)
+                                    continue
+                                    
                             elif response.status == 404:
                                 # Пробуем следующий endpoint
                                 error_text = await response.text()
@@ -114,8 +170,8 @@ class PaypalychProvider(PaymentProvider):
                                 error_text = await response.text()
                                 logger.error(f"Paypalych API error {response.status} on {endpoint}: {error_text}")
                                 last_error = f"{response.status}: {error_text}"
-                                # Не пробуем дальше при других ошибках (400, 401, 403, 500)
-                                if response.status not in [404]:
+                                # Не пробуем дальше при других ошибках (401, 403, 500)
+                                if response.status not in [404, 400]:
                                     break
                     except Exception as e:
                         logger.warning(f"Error trying endpoint {endpoint}: {e}")
