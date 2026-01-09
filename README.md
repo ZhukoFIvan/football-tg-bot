@@ -189,9 +189,8 @@ FREEKASSA_MERCHANT_ID=ваш_merchant_id
 FREEKASSA_SECRET_KEY=ваш_secret_key_1
 FREEKASSA_SECRET_KEY2=ваш_secret_key_2
 
-# PayPalych (https://paypalych.com/)
+# PayPalych (https://pally.info/merchant/api)
 PAYPALYCH_API_KEY=ваш_api_key
-PAYPALYCH_SECRET_KEY=ваш_secret_key
 ```
 
 **Важно:** Получите эти данные в личных кабинетах соответствующих платежных систем.
@@ -706,7 +705,7 @@ curl -X POST "http://localhost:8000/orders" \
 
 1. **Регистрация и получение данных:**
 
-   - Зарегистрируйтесь на [PayPalych.com](https://paypalych.com/)
+   - Зарегистрируйтесь на [Pally.info](https://pally.info/merchant/api)
    - В личном кабинете получите:
      - `API Key` (ключ API)
      - `Secret Key` (секретный ключ для подписи)
@@ -715,7 +714,6 @@ curl -X POST "http://localhost:8000/orders" \
 
    ```env
    PAYPALYCH_API_KEY=ваш_api_key
-   PAYPALYCH_SECRET_KEY=ваш_secret_key
    ```
 
 3. **Настройка webhook в личном кабинете PayPalych:**
