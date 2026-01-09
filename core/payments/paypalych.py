@@ -19,7 +19,8 @@ class PaypalychProvider(PaymentProvider):
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.api_url = "https://pally.info/merchant/api" 
+        # API URL для Paypalych (pal24.pro)
+        self.api_url = "https://pal24.pro/api" 
 
     async def create_payment(
         self,
@@ -41,26 +42,16 @@ class PaypalychProvider(PaymentProvider):
         try:
             # Реальный запрос к API Paypalych
             async with aiohttp.ClientSession() as session:
-                # API ключ в формате merchant_id|api_key
-                # ВАЖНО: Проверьте документацию Paypalych для правильного формата авторизации
-                # Возможные варианты:
-                # - Authorization: Bearer {api_key}
-                # - X-API-Key: {api_key}
-                # - Authorization: Basic {base64(api_key)}
+                # API ключ в формате merchant_id|api_key (из примера: 72|oBCB7Z3SmUm1gvkpEdRcSR2q1ERHpG4vD3DNBmuT)
                 headers = {
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 }
                 
                 # URL для создания платежа
-                # ВАЖНО: Проверьте документацию Paypalych для правильного endpoint
-                # Возможные варианты:
-                # - /invoice
-                # - /payment
-                # - /create
-                # - /v1/invoice
-                # - /v1/payment
-                invoice_url = f"{self.api_url}/invoice"
+                # Пример показывает pal24.pro, но для создания платежа нужен другой endpoint
+                # Попробуем стандартные варианты:
+                invoice_url = f"{self.api_url}/invoice"  # или /payment, /create, /v1/invoice
                 
                 data = {
                     "amount": float(amount),
