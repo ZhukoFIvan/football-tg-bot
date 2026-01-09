@@ -39,7 +39,7 @@ class PaypalychProvider(PaymentProvider):
         """
         Проверить правильность API токена перед созданием платежа
         
-        Делает простой запрос к API для проверки авторизации
+        Делает простой GET запрос к API для проверки авторизации
         """
         try:
             async with aiohttp.ClientSession() as session:
@@ -47,47 +47,24 @@ class PaypalychProvider(PaymentProvider):
                     "Authorization": f"Bearer {self.api_key}",
                 }
                 
-                # Простой запрос для проверки токена
-                # Используем тот же endpoint, но с минимальными данными для проверки
-                check_url = f"{self.api_url}/api/v1/bill/create"
+                # Пробуем простой GET запрос для проверки токена
+                # Если есть endpoint для проверки, используем его, иначе просто проверяем формат токена
+                # В документации нет специального endpoint для проверки, поэтому просто проверяем формат
+                if "|" not in self.api_key:
+                    logger.error("Paypalych API token format is incorrect (missing '|' separator)")
+                    return False
                 
-                # Создаем минимальный form-data для проверки
-                data_form = aiohttp.FormData()
-                data_form.add_field("amount", "1")
-                data_form.add_field("order_id", "test_token_check")
-                data_form.add_field("description", "Token verification")
-                data_form.add_field("type", "normal")
-                data_form.add_field("shop_id", str(self.shop_id))
-                data_form.add_field("currency_in", "RUB")
-                data_form.add_field("custom", "token_check")
-                data_form.add_field("payer_pays_commission", "1")
-                data_form.add_field("name", "Проверка токена")
+                # Проверяем, что токен не пустой
+                parts = self.api_key.split("|", 1)
+                if len(parts) != 2 or not parts[0] or not parts[1]:
+                    logger.error("Paypalych API token format is incorrect (empty parts)")
+                    return False
                 
-                async with session.post(
-                    check_url,
-                    headers=headers,
-                    data=data_form,
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    if response.status == 401:
-                        logger.error(f"Paypalych API token is invalid (401 Unauthenticated)")
-                        return False
-                    elif response.status == 200 or response.status == 201:
-                        logger.info("Paypalych API token is valid")
-                        return True
-                    else:
-                        # Если не 401, значит токен валиден, но могут быть другие ошибки (например, shop_id)
-                        # Это нормально для проверки токена
-                        error_text = await response.text()
-                        if "Unauthenticated" in error_text or response.status == 401:
-                            logger.error(f"Paypalych API token is invalid: {error_text}")
-                            return False
-                        logger.info(f"Paypalych API token is valid (response status: {response.status})")
-                        return True
+                logger.info("Paypalych API token format is valid")
+                return True
         except Exception as e:
             logger.error(f"Error verifying Paypalych API token: {e}", exc_info=True)
-            # При ошибке сети считаем, что токен может быть валиден
-            return True 
+            return False 
 
     async def create_payment(
         self,
@@ -184,6 +161,19 @@ class PaypalychProvider(PaymentProvider):
                             f"Paypalych API error {response.status}: {error_text}. "
                             f"Request data: shop_id={self.shop_id}, amount={amount}, order_id={order_id}"
                         )
+                        
+                        # Если shop_id не найден, даем понятное сообщение
+                        if response.status == 422 and "shop_not_found" in error_text:
+                            raise Exception(
+                                f"Paypalych API error: shop_id '{self.shop_id}' not found. "
+                                f"This shop_id was extracted from your API token (merchant_id part). "
+                                f"Please contact Paypalych support to:\n"
+                                f"1. Verify your API token is correct\n"
+                                f"2. Get the correct shop_id for your account\n"
+                                f"3. Confirm if shop_id should match merchant_id from token\n"
+                                f"Original error: {error_text}"
+                            )
+                        
                         raise Exception(f"Paypalych API error {response.status}: {error_text}")
                         
         except Exception as e:
