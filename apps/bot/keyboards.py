@@ -15,7 +15,7 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
         [
             KeyboardButton(
                 text="🛒 Открыть магазин",
-                web_app=WebAppInfo(url="http://romixstore.ru")
+                web_app=WebAppInfo(url="https://romixstore.ru")
             )
         ]
     ]

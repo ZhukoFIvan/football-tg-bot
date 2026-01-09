@@ -128,7 +128,7 @@ async def process_broadcast_button_text(message: Message, state: FSMContext, bot
             [
                 InlineKeyboardButton(
                     text=button_text,
-                    web_app=WebAppInfo(url="http://romixstore.ru")
+                    web_app=WebAppInfo(url="https://romixstore.ru")
                 )
             ]
         ]
