@@ -15,7 +15,7 @@ class PaypalychProvider(PaymentProvider):
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.api_url = "https://paypalych.com/api/v1"  # Примерный URL, нужно уточнить
+        self.api_url = "https://pally.info/merchant/api" 
 
     async def create_payment(
         self,
@@ -24,7 +24,7 @@ class PaypalychProvider(PaymentProvider):
         currency: str,
         description: str,
         user_id: int,
-        payment_method: str = "card"  # "card" или "sbp"
+        payment_method: str = "sbp" 
     ) -> Dict:
         """
         Создать платеж в PayPaly
