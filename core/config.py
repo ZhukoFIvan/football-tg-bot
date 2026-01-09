@@ -40,8 +40,7 @@ class Settings(BaseSettings):
     FREEKASSA_SECRET_KEY2: str = ""  # Secret Key 2
 
     # Payment Providers - PayPaly
-    PAYPALYCH_API_KEY: str = ""
-    PAYPALYCH_SECRET_KEY: str = ""
+    PAYPALYCH_API_KEY: str = ""  # API ключ Paypalych (формат: merchant_id|api_key)
 
     model_config = SettingsConfigDict(
         env_file=".env",

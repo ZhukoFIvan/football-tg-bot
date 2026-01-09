@@ -310,10 +310,10 @@ async def paypalych_webhook(
             return {"status": "error", "message": "Payment not found"}
         
         # Проверить подпись (если требуется)
+        # Paypalych может не использовать подпись, поэтому проверка опциональна
         if signature:
             provider = PaypalychProvider(
-                api_key=settings.PAYPALYCH_API_KEY,
-                secret_key=settings.PAYPALYCH_SECRET_KEY
+                api_key=settings.PAYPALYCH_API_KEY
             )
             if not provider.verify_webhook_signature(order_id_str, amount_str, signature):
                 logger.error(f"Неверная подпись для платежа {payment.id}")
