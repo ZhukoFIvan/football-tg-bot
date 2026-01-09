@@ -2,6 +2,7 @@
 Webhook эндпоинты для обработки платежных уведомлений
 """
 import logging
+import re
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -279,38 +280,71 @@ async def paypalych_webhook(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Webhook для обработки уведомлений от PayPaly
+    Webhook для обработки postback от PayPaly
     
-    PayPaly отправляет POST запрос с JSON данными
+    PayPaly отправляет POST запрос с JSON данными в формате:
+    {
+      "Status": "SUCCESS" или "FAIL",
+      "InvId": "order_id",
+      "OutSum": "amount",
+      "TrsId": "bill_id",
+      "SignatureValue": "signature",
+      ...
+    }
     """
     try:
         data = await request.json()
         
-        order_id_str = data.get("order_id")
-        amount_str = data.get("amount")
-        status = data.get("status")
-        signature = data.get("signature")
+        # Формат postback от Paypalych
+        status = data.get("Status")  # "SUCCESS" или "FAIL"
+        order_id_str = data.get("InvId")  # order_id в формате строки
+        amount_str = data.get("OutSum")  # сумма
+        bill_id = data.get("TrsId")  # bill_id (ID платежа)
+        signature = data.get("SignatureValue")  # подпись
         
         if not all([order_id_str, amount_str, status]):
             raise HTTPException(status_code=400, detail="Missing required parameters")
         
-        order_id = int(order_id_str)
+        # Парсим order_id (может быть строкой типа "Заказ 123" или просто числом)
+        try:
+            # Пробуем извлечь число из строки
+            order_id_match = re.search(r'\d+', str(order_id_str))
+            if order_id_match:
+                order_id = int(order_id_match.group())
+            else:
+                order_id = int(order_id_str)
+        except (ValueError, AttributeError):
+            logger.error(f"Не удалось распарсить order_id из {order_id_str}")
+            raise HTTPException(status_code=400, detail="Invalid order_id format")
+        
         amount = Decimal(amount_str)
         
-        # Найти платеж
+        # Найти платеж по order_id или bill_id
         payment_result = await db.execute(
             select(Payment)
-            .where(Payment.order_id == order_id, Payment.provider == "paypalych")
+            .where(
+                (Payment.order_id == order_id) & (Payment.provider == "paypalych")
+            )
             .options(selectinload(Payment.user), selectinload(Payment.order))
         )
         payment = payment_result.scalar_one_or_none()
         
+        # Если не нашли по order_id, пробуем найти по bill_id (payment_id)
+        if not payment and bill_id:
+            payment_result = await db.execute(
+                select(Payment)
+                .where(
+                    (Payment.payment_id == bill_id) & (Payment.provider == "paypalych")
+                )
+                .options(selectinload(Payment.user), selectinload(Payment.order))
+            )
+            payment = payment_result.scalar_one_or_none()
+        
         if not payment:
-            logger.warning(f"Платеж не найден для заказа {order_id}")
+            logger.warning(f"Платеж не найден для заказа {order_id} или bill_id {bill_id}")
             return {"status": "error", "message": "Payment not found"}
         
         # Проверить подпись (если требуется)
-        # Paypalych может не использовать подпись, поэтому проверка опциональна
         if signature:
             provider = PaypalychProvider(
                 api_key=settings.PAYPALYCH_API_KEY
@@ -319,23 +353,15 @@ async def paypalych_webhook(
                 logger.error(f"Неверная подпись для платежа {payment.id}")
                 raise HTTPException(status_code=400, detail="Invalid signature")
         
-        # Проверить сумму
-        if payment.amount != amount:
+        # Проверить сумму (допускаем небольшую погрешность)
+        amount_diff = abs(float(payment.amount) - float(amount))
+        if amount_diff > 0.01:  # Разница больше 1 копейки
             logger.error(f"Неверная сумма для платежа {payment.id}: ожидалось {payment.amount}, получено {amount}")
             raise HTTPException(status_code=400, detail="Amount mismatch")
         
-        # Обновить статус платежа в зависимости от статуса от PayPaly
-        payment_status_map = {
-            "paid": "success",
-            "success": "success",
-            "failed": "failed",
-            "cancelled": "cancelled",
-            "refunded": "refunded"
-        }
-        
-        new_status = payment_status_map.get(status.lower(), "pending")
-        
-        if new_status == "success":
+        # Обновить статус платежа
+        # Status: "SUCCESS" -> success, "FAIL" -> failed
+        if status.upper() == "SUCCESS":
             await update_payment_status(payment, "success", db, paid_at=datetime.utcnow())
             
             # Отправить уведомление пользователю
@@ -351,7 +377,7 @@ async def paypalych_webhook(
 Ваш заказ оплачен и будет обработан в ближайшее время.
 """
                 await send_telegram_notification(user.telegram_id, message)
-        elif new_status == "failed":
+        elif status.upper() == "FAIL":
             await update_payment_status(payment, "failed", db)
             
             # Отправить уведомление об ошибке
@@ -367,27 +393,13 @@ async def paypalych_webhook(
 Платеж не был выполнен. Пожалуйста, попробуйте еще раз.
 """
                 await send_telegram_notification(user.telegram_id, message)
-        elif new_status == "cancelled":
-            await update_payment_status(payment, "cancelled", db)
-            
-            # Отправить уведомление об отмене
-            user = payment.user
-            if user:
-                message = f"""
-❌ <b>Платеж отменен</b>
-
-📦 Заказ #{order_id}
-💰 Сумма: {float(amount):,.2f} ₽
-💳 Провайдер: PayPaly
-
-Платеж был отменен. Заказ отменен, товары возвращены на склад.
-"""
-                await send_telegram_notification(user.telegram_id, message)
+        else:
+            logger.warning(f"Неизвестный статус от Paypalych: {status}")
         
         return {"status": "success"}
         
     except Exception as e:
-        logger.error(f"Ошибка при обработке webhook PayPaly: {e}")
+        logger.error(f"Ошибка при обработке webhook PayPaly: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
