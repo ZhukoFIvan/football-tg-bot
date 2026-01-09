@@ -23,15 +23,24 @@ class PaypalychProvider(PaymentProvider):
         self.api_url = "https://pal24.pro"
         
         # Извлекаем merchant_id из API ключа (формат: merchant_id|api_key)
+        # Пример из документации: 72|oBCB7Z3SmUm1gvkpEdRcSR2q1ERHpG4vD3DNBmuT
         if "|" in api_key:
-            self.merchant_id = api_key.split("|")[0]
+            parts = api_key.split("|", 1)  # Разделяем только по первому |
+            self.merchant_id = parts[0]
+            logger.info(f"Extracted merchant_id from API key: {self.merchant_id}")
         else:
             self.merchant_id = None
+            logger.warning(
+                f"API key doesn't contain '|' separator. "
+                f"Expected format: merchant_id|api_key (e.g., 72|oBCB7Z3SmUm1gvkpEdRcSR2q1ERHpG4vD3DNBmuT)"
+            )
         
         # shop_id - это отдельный параметр из настроек магазина Paypalych
+        # В документации пример: shop_id="G1vrEyX0LR" (строка, не число!)
         # Если не указан, пробуем использовать merchant_id из API ключа
         if shop_id:
-            self.shop_id = str(shop_id)  # Убеждаемся, что это строка
+            self.shop_id = str(shop_id).strip()  # Убеждаемся, что это строка без пробелов
+            logger.info(f"Using shop_id from config: {self.shop_id}")
         elif self.merchant_id:
             # Fallback: используем merchant_id из API ключа
             logger.warning(
@@ -71,12 +80,15 @@ class PaypalychProvider(PaymentProvider):
                 }
                 
                 # Формируем form-data согласно документации
+                # В документации order_id и shop_id передаются как строки в кавычках
+                # Но в form-data кавычки не нужны, aiohttp сам обработает
                 data_form = aiohttp.FormData()
                 data_form.add_field("amount", str(float(amount)))
-                data_form.add_field("order_id", str(order_id))
+                data_form.add_field("order_id", str(order_id))  # Передаем как строку
                 data_form.add_field("description", description)
                 data_form.add_field("type", "normal")
-                data_form.add_field("shop_id", self.shop_id)
+                # shop_id должен быть строкой (в документации: shop_id="G1vrEyX0LR")
+                data_form.add_field("shop_id", str(self.shop_id))  # Убеждаемся, что это строка
                 data_form.add_field("currency_in", currency.upper())
                 data_form.add_field("custom", f"order_{order_id}_user_{user_id}")
                 data_form.add_field("payer_pays_commission", "1")  # 1 = да, 0 = нет
@@ -84,7 +96,20 @@ class PaypalychProvider(PaymentProvider):
                 
                 invoice_url = f"{self.api_url}/api/v1/bill/create"
                 
-                logger.info(f"Creating Paypalych payment: {invoice_url}, amount={amount}, order_id={order_id}, shop_id={self.shop_id}")
+                # Логируем все параметры для отладки
+                # ВАЖНО: Показываем, что токен используется как есть, без изменений
+                api_key_preview = f"{self.api_key[:10]}..." if len(self.api_key) > 10 else self.api_key
+                logger.info(
+                    f"Creating Paypalych payment:\n"
+                    f"  URL: {invoice_url}\n"
+                    f"  Authorization: Bearer {api_key_preview} (полный токен из .env, БЕЗ изменений)\n"
+                    f"  Form data:\n"
+                    f"    amount={amount}\n"
+                    f"    order_id={order_id}\n"
+                    f"    shop_id={self.shop_id} (отдельный параметр, НЕ часть токена)\n"
+                    f"    merchant_id из токена={self.merchant_id}\n"
+                    f"  ВАЖНО: Токен используется как есть ({self.api_key[:20]}...), shop_id передается отдельно"
+                )
                 
                 async with session.post(
                     invoice_url,
@@ -211,12 +236,12 @@ class PaypalychProvider(PaymentProvider):
                                         
                                         # Обновляем shop_id для будущих запросов
                                         self.shop_id = str(self.merchant_id)
-                                        
-                                        return {
+        
+        return {
                                             "payment_id": payment_id,
                                             "payment_url": payment_url,
-                                            "status": "pending"
-                                        }
+            "status": "pending"
+        }
                                     else:
                                         error_text_merchant = await response_merchant.text()
                                         logger.warning(f"Request with merchant_id failed: {error_text_merchant}")
