@@ -65,7 +65,7 @@ class PaypalychProvider(PaymentProvider):
         
         return {
             "payment_id": f"paypalych_{order_id}_{idempotence_key[:8]}",
-            "payment_url": f"https://pally.info/merchant/api/pay/{order_id}?method={payment_method}",
+            "payment_url": f"https://pally.info/pay/{order_id}?method={payment_method}",
             "status": "pending"
         }
 
