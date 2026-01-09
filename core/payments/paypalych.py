@@ -49,9 +49,18 @@ class PaypalychProvider(PaymentProvider):
                 }
                 
                 # URL для создания платежа
-                # Пример показывает pal24.pro, но для создания платежа нужен другой endpoint
-                # Попробуем стандартные варианты:
-                invoice_url = f"{self.api_url}/invoice"  # или /payment, /create, /v1/invoice
+                # Пробуем разные варианты endpoint'ов (404 означает, что /api/invoice неверный)
+                endpoints_to_try = [
+                    "/api/payment",
+                    "/api/payment/create", 
+                    "/api/invoice/create",
+                    "/merchant/api/invoice",
+                    "/merchant/api/payment",
+                    "/api/v1/invoice",
+                    "/api/v1/payment",
+                    "/invoice",
+                    "/payment",
+                ]
                 
                 data = {
                     "amount": float(amount),
@@ -63,34 +72,55 @@ class PaypalychProvider(PaymentProvider):
                     "fail_url": f"{settings.API_PUBLIC_URL}/payments/failed?order_id={order_id}",
                 }
                 
-                logger.info(f"Creating Paypalych payment: {invoice_url}, data: {data}")
+                # Пробуем каждый endpoint до первого успешного
+                last_error = None
+                for endpoint in endpoints_to_try:
+                    invoice_url = f"{self.api_url}{endpoint}"
+                    logger.info(f"Trying Paypalych endpoint: {invoice_url}, data: {data}")
+                    
+                    try:
+                        async with session.post(
+                            invoice_url,
+                            headers=headers,
+                            json=data,
+                            timeout=aiohttp.ClientTimeout(total=30)
+                        ) as response:
+                            if response.status == 200 or response.status == 201:
+                                result = await response.json()
+                                logger.info(f"Paypalych payment created via {endpoint}: {result}")
+                                
+                                # Обычно в ответе есть payment_url или invoice_url
+                                payment_url = result.get("payment_url") or result.get("invoice_url") or result.get("url")
+                                payment_id = result.get("payment_id") or result.get("invoice_id") or result.get("id")
+                                
+                                if not payment_url:
+                                    raise ValueError(f"No payment_url in response: {result}")
+                                
+                                return {
+                                    "payment_id": payment_id or f"paypalych_{order_id}_{idempotence_key[:8]}",
+                                    "payment_url": payment_url,
+                                    "status": result.get("status", "pending")
+                                }
+                            elif response.status == 404:
+                                # Пробуем следующий endpoint
+                                error_text = await response.text()
+                                logger.warning(f"Endpoint {endpoint} returned 404: {error_text}")
+                                last_error = f"404: {error_text}"
+                                continue
+                            else:
+                                error_text = await response.text()
+                                logger.error(f"Paypalych API error {response.status} on {endpoint}: {error_text}")
+                                last_error = f"{response.status}: {error_text}"
+                                # Не пробуем дальше при других ошибках (400, 401, 403, 500)
+                                if response.status not in [404]:
+                                    break
+                    except Exception as e:
+                        logger.warning(f"Error trying endpoint {endpoint}: {e}")
+                        last_error = str(e)
+                        continue
                 
-                async with session.post(
-                    invoice_url,
-                    headers=headers,
-                    json=data,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status == 200 or response.status == 201:
-                        result = await response.json()
-                        logger.info(f"Paypalych payment created: {result}")
-                        
-                        # Обычно в ответе есть payment_url или invoice_url
-                        payment_url = result.get("payment_url") or result.get("invoice_url") or result.get("url")
-                        payment_id = result.get("payment_id") or result.get("invoice_id") or result.get("id")
-                        
-                        if not payment_url:
-                            raise ValueError(f"No payment_url in response: {result}")
-                        
-                        return {
-                            "payment_id": payment_id or f"paypalych_{order_id}_{idempotence_key[:8]}",
-                            "payment_url": payment_url,
-                            "status": result.get("status", "pending")
-                        }
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Paypalych API error {response.status}: {error_text}")
-                        raise Exception(f"Paypalych API error {response.status}: {error_text}")
+                # Если все endpoint'ы не сработали
+                raise Exception(f"All Paypalych endpoints failed. Last error: {last_error}")
                         
         except Exception as e:
             logger.error(f"Error creating Paypalych payment: {e}", exc_info=True)
