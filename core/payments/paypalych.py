@@ -236,12 +236,12 @@ class PaypalychProvider(PaymentProvider):
                                         
                                         # Обновляем shop_id для будущих запросов
                                         self.shop_id = str(self.merchant_id)
-        
-        return {
+                                        
+                                        return {
                                             "payment_id": payment_id,
                                             "payment_url": payment_url,
-            "status": "pending"
-        }
+                                            "status": "pending"
+                                        }
                                     else:
                                         error_text_merchant = await response_merchant.text()
                                         logger.warning(f"Request with merchant_id failed: {error_text_merchant}")
