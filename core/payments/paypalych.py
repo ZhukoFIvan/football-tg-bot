@@ -17,20 +17,34 @@ logger = logging.getLogger(__name__)
 class PaypalychProvider(PaymentProvider):
     """Провайдер оплаты через PayPaly"""
 
-    def __init__(self, api_key: str, shop_id: str):
+    def __init__(self, api_key: str, shop_id: str = None):
         self.api_key = api_key
         # API URL для Paypalych (pal24.pro)
         self.api_url = "https://pal24.pro"
         
+        # Извлекаем merchant_id из API ключа (формат: merchant_id|api_key)
+        if "|" in api_key:
+            self.merchant_id = api_key.split("|")[0]
+        else:
+            self.merchant_id = None
+        
         # shop_id - это отдельный параметр из настроек магазина Paypalych
-        # Его можно найти в личном кабинете Paypalych в настройках магазина
-        if not shop_id:
+        # Если не указан, пробуем использовать merchant_id из API ключа
+        if shop_id:
+            self.shop_id = str(shop_id)  # Убеждаемся, что это строка
+        elif self.merchant_id:
+            # Fallback: используем merchant_id из API ключа
+            logger.warning(
+                f"PAYPALYCH_SHOP_ID not set, using merchant_id from API key: {self.merchant_id}. "
+                f"If this doesn't work, please set PAYPALYCH_SHOP_ID in .env file."
+            )
+            self.shop_id = str(self.merchant_id)
+        else:
             raise ValueError(
                 "shop_id is required for Paypalych. "
-                "Please set PAYPALYCH_SHOP_ID in .env file. "
+                "Please set PAYPALYCH_SHOP_ID in .env file, or ensure API key format is merchant_id|api_key. "
                 "You can find shop_id in your Paypalych merchant dashboard settings."
-            )
-        self.shop_id = shop_id 
+            ) 
 
     async def create_payment(
         self,
@@ -103,7 +117,62 @@ class PaypalychProvider(PaymentProvider):
                         }
                     else:
                         error_text = await response.text()
-                        logger.error(f"Paypalych API error {response.status}: {error_text}")
+                        logger.error(
+                            f"Paypalych API error {response.status}: {error_text}. "
+                            f"Request data: shop_id={self.shop_id}, merchant_id={self.merchant_id}, "
+                            f"amount={amount}, order_id={order_id}"
+                        )
+                        
+                        # Если shop_id не найден и мы использовали переданный shop_id, 
+                        # пробуем использовать merchant_id из API ключа
+                        if response.status == 422 and "shop_not_found" in error_text:
+                            if self.shop_id and self.merchant_id and str(self.shop_id) != str(self.merchant_id):
+                                logger.warning(
+                                    f"shop_id {self.shop_id} not found. Trying merchant_id {self.merchant_id} from API key..."
+                                )
+                                # Пробуем с merchant_id
+                                data_form_retry = aiohttp.FormData()
+                                data_form_retry.add_field("amount", str(float(amount)))
+                                data_form_retry.add_field("order_id", str(order_id))
+                                data_form_retry.add_field("description", description)
+                                data_form_retry.add_field("type", "normal")
+                                data_form_retry.add_field("shop_id", str(self.merchant_id))
+                                data_form_retry.add_field("currency_in", currency.upper())
+                                data_form_retry.add_field("custom", f"order_{order_id}_user_{user_id}")
+                                data_form_retry.add_field("payer_pays_commission", "1")
+                                data_form_retry.add_field("name", "Платёж")
+                                
+                                async with session.post(
+                                    invoice_url,
+                                    headers=headers,
+                                    data=data_form_retry,
+                                    timeout=aiohttp.ClientTimeout(total=30)
+                                ) as response_retry:
+                                    if response_retry.status == 200 or response_retry.status == 201:
+                                        result = await response_retry.json()
+                                        logger.info(f"Paypalych payment created with merchant_id: {result}")
+                                        
+                                        if result.get("success") != "true" and result.get("success") is not True:
+                                            error_msg = result.get("message", "Unknown error")
+                                            raise Exception(f"Paypalych API returned error: {error_msg}")
+                                        
+                                        payment_url = result.get("link_page_url") or result.get("link_url")
+                                        payment_id = result.get("bill_id")
+                                        
+                                        if not payment_url:
+                                            raise ValueError(f"No payment_url in response: {result}")
+                                        if not payment_id:
+                                            raise ValueError(f"No bill_id in response: {result}")
+                                        
+                                        # Обновляем shop_id для будущих запросов
+                                        self.shop_id = str(self.merchant_id)
+                                        
+                                        return {
+                                            "payment_id": payment_id,
+                                            "payment_url": payment_url,
+                                            "status": "pending"
+                                        }
+                        
                         raise Exception(f"Paypalych API error {response.status}: {error_text}")
                         
         except Exception as e:
