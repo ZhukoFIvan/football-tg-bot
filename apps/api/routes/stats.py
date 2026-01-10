@@ -102,7 +102,7 @@ async def get_overview_stats(
 
     # Общая выручка (только paid и completed)
     total_revenue = await db.scalar(
-        select(func.sum(Order.amount)).where(
+        select(func.sum(Order.final_amount)).where(
             Order.status.in_(["paid", "completed"])
         )
     ) or 0.0
@@ -344,7 +344,7 @@ async def get_top_products(
         Product.id,
         Product.title,
         func.count(Order.id).label("orders_count"),
-        func.sum(Order.amount).label("revenue")
+        func.sum(Order.final_amount).label("revenue")
     ).join(
         Order, Order.product_id == Product.id
     ).where(
