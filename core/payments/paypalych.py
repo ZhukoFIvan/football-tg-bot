@@ -107,6 +107,11 @@ class PaypalychProvider(PaymentProvider):
                 # Формируем form-data согласно документации
                 # В документации order_id и shop_id передаются как строки в кавычках
                 # Но в form-data кавычки не нужны, aiohttp сам обработает
+                
+                # ВАЖНО: result_url - URL для postback уведомлений от Paypalych
+                from core.config import settings
+                result_url = f"{settings.API_URL}/api/payments/webhook/paypalych"
+                
                 data_form = aiohttp.FormData()
                 data_form.add_field("amount", str(float(amount)))
                 data_form.add_field("order_id", str(order_id))  # Передаем как строку
@@ -118,6 +123,7 @@ class PaypalychProvider(PaymentProvider):
                 data_form.add_field("custom", f"order_{order_id}_user_{user_id}")
                 data_form.add_field("payer_pays_commission", "1")  # 1 = да, 0 = нет
                 data_form.add_field("name", "Платёж")
+                data_form.add_field("result_url", result_url)  # URL для postback
                 
                 invoice_url = f"{self.api_url}/api/v1/bill/create"
                 
@@ -132,7 +138,8 @@ class PaypalychProvider(PaymentProvider):
                     f"    - order_id: {order_id} (type: {type(order_id).__name__})\n"
                     f"    - shop_id: '{self.shop_id}' (type: {type(self.shop_id).__name__})\n"
                     f"    - description: {description}\n"
-                    f"    - currency_in: {currency.upper()}"
+                    f"    - currency_in: {currency.upper()}\n"
+                    f"    - result_url: {result_url}"  # Логируем result_url
                 )
                 
                 async with session.post(
