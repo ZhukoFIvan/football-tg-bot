@@ -351,6 +351,8 @@ async def paypalych_webhook(
     """
     try:
         data = await request.json()
+        logger.info(f"===== PAYPALYCH WEBHOOK RECEIVED =====")
+        logger.info(f"Webhook data: {data}")
         
         # Формат postback от Paypalych
         status = data.get("Status")  # "SUCCESS" или "FAIL"
@@ -420,7 +422,9 @@ async def paypalych_webhook(
         # Обновить статус платежа
         # Status: "SUCCESS" -> success, "FAIL" -> failed
         if status.upper() == "SUCCESS":
+            logger.info(f"Payment SUCCESS for order {order_id}, updating status...")
             await update_payment_status(payment, "success", db, paid_at=datetime.utcnow())
+            logger.info(f"Payment status updated, bonus_earned: {payment.order.bonus_earned if payment.order else 'N/A'}")
             
             # Отправить уведомление пользователю
             user = payment.user
