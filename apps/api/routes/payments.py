@@ -339,7 +339,7 @@ async def paypalych_webhook(
     """
     Webhook для обработки postback от PayPaly
     
-    PayPaly отправляет POST запрос с JSON данными в формате:
+    PayPaly отправляет POST запрос с JSON данными или form-data в формате:
     {
       "Status": "SUCCESS" или "FAIL",
       "InvId": "order_id",
@@ -350,9 +350,28 @@ async def paypalych_webhook(
     }
     """
     try:
-        data = await request.json()
         logger.info(f"===== PAYPALYCH WEBHOOK RECEIVED =====")
-        logger.info(f"Webhook data: {data}")
+        logger.info(f"Content-Type: {request.headers.get('content-type')}")
+        
+        # Получить raw body для отладки
+        body = await request.body()
+        logger.info(f"Raw body: {body}")
+        
+        # Попытка распарсить как JSON
+        data = {}
+        try:
+            data = await request.json()
+            logger.info(f"Parsed as JSON: {data}")
+        except:
+            # Если не JSON, пробуем form-data
+            logger.info("Failed to parse as JSON, trying form-data...")
+            form_data = await request.form()
+            data = dict(form_data)
+            logger.info(f"Parsed as form-data: {data}")
+        
+        if not data:
+            logger.error("Empty data received")
+            raise HTTPException(status_code=400, detail="Empty data")
         
         # Формат postback от Paypalych
         status = data.get("Status")  # "SUCCESS" или "FAIL"
@@ -460,6 +479,8 @@ async def paypalych_webhook(
         
         return {"status": "success"}
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Ошибка при обработке webhook PayPaly: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
