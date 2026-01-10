@@ -1,5 +1,5 @@
 """
-Эндпоинты для системы отзывов
+Эндпоинты для системы отзывов (отзывы относятся ко всему магазину, а не к конкретным товарам)
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from decimal import Decimal
 
 from core.db.session import get_db
-from core.db.models import Review, Product, User
+from core.db.models import Review, User
 from core.dependencies import get_current_user
 
 router = APIRouter()
@@ -18,7 +18,6 @@ router = APIRouter()
 # ==================== PYDANTIC SCHEMAS ====================
 
 class ReviewCreate(BaseModel):
-    product_id: int
     rating: int = Field(..., ge=1, le=5, description="Рейтинг от 1 до 5 звезд")
     comment: Optional[str] = Field(
         None, max_length=1000, description="Текст отзыва")
@@ -53,7 +52,6 @@ class ReviewUserInfo(BaseModel):
 
 class ReviewResponse(BaseModel):
     id: int
-    product_id: int
     user: ReviewUserInfo
     rating: int
     comment: Optional[str] = None
@@ -76,7 +74,6 @@ class ReviewResponse(BaseModel):
 
         return cls(
             id=review.id,
-            product_id=review.product_id,
             user=ReviewUserInfo.from_orm(review.user),
             rating=review.rating,
             comment=review.comment,
@@ -87,8 +84,8 @@ class ReviewResponse(BaseModel):
         )
 
 
-class ProductRatingInfo(BaseModel):
-    """Статистика рейтинга товара"""
+class ShopRatingInfo(BaseModel):
+    """Статистика рейтинга магазина"""
     average_rating: float
     reviews_count: int
     rating_distribution: dict  # {5: 10, 4: 5, 3: 2, 2: 1, 1: 0}
@@ -96,38 +93,26 @@ class ProductRatingInfo(BaseModel):
 
 # ==================== ENDPOINTS ====================
 
-@router.get("/products/{product_id}/reviews", response_model=List[ReviewResponse])
-async def get_product_reviews(
-    product_id: int,
+@router.get("/reviews", response_model=List[ReviewResponse])
+async def get_shop_reviews(
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user)
 ):
     """
-    Получить отзывы на товар
+    Получить отзывы на магазин
     Показывает одобренные отзывы для всех + собственные отзывы пользователя (любого статуса)
     """
-    # Проверить существование товара
-    product_result = await db.execute(
-        select(Product).where(Product.id == product_id)
-    )
-    product = product_result.scalar_one_or_none()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-
     # Получить одобренные отзывы и собственные отзывы пользователя (если авторизован)
     if current_user:
         # Получить одобренные отзывы ИЛИ собственные отзывы текущего пользователя
         reviews_result = await db.execute(
             select(Review)
             .where(
-                and_(
-                    Review.product_id == product_id,
-                    or_(
-                        Review.status == "approved",
-                        Review.user_id == current_user.id
-                    )
+                or_(
+                    Review.status == "approved",
+                    Review.user_id == current_user.id
                 )
             )
             .order_by(Review.created_at.desc())
@@ -138,12 +123,7 @@ async def get_product_reviews(
         # Для неавторизованных - только одобренные отзывы
         reviews_result = await db.execute(
             select(Review)
-            .where(
-                and_(
-                    Review.product_id == product_id,
-                    Review.status == "approved"
-                )
-            )
+            .where(Review.status == "approved")
             .order_by(Review.created_at.desc())
             .limit(limit)
             .offset(offset)
@@ -167,34 +147,20 @@ async def get_product_reviews(
     return [ReviewResponse.from_orm_with_user(review, current_user_id) for review in reviews]
 
 
-@router.get("/products/{product_id}/rating", response_model=ProductRatingInfo)
-async def get_product_rating(
-    product_id: int,
+@router.get("/shop/rating", response_model=ShopRatingInfo)
+async def get_shop_rating(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Получить статистику рейтинга товара
+    Получить статистику рейтинга магазина
     """
-    # Проверить существование товара
-    product_result = await db.execute(
-        select(Product).where(Product.id == product_id)
-    )
-    product = product_result.scalar_one_or_none()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-
     # Пересчитать статистику напрямую из таблицы reviews (только одобренные)
     stats_result = await db.execute(
         select(
             func.avg(Review.rating).label('avg_rating'),
             func.count(Review.id).label('count')
         )
-        .where(
-            and_(
-                Review.product_id == product_id,
-                Review.status == "approved"
-            )
-        )
+        .where(Review.status == "approved")
     )
     stats = stats_result.first()
 
@@ -209,12 +175,7 @@ async def get_product_rating(
     # Получить распределение рейтингов (только одобренные)
     rating_dist_result = await db.execute(
         select(Review.rating, func.count(Review.id))
-        .where(
-            and_(
-                Review.product_id == product_id,
-                Review.status == "approved"
-            )
-        )
+        .where(Review.status == "approved")
         .group_by(Review.rating)
     )
     rating_distribution = {row[0]: row[1] for row in rating_dist_result.all()}
@@ -224,7 +185,7 @@ async def get_product_rating(
         if i not in rating_distribution:
             rating_distribution[i] = 0
 
-    return ProductRatingInfo(
+    return ShopRatingInfo(
         average_rating=average_rating,
         reviews_count=reviews_count,
         rating_distribution=rating_distribution
@@ -238,46 +199,30 @@ async def create_review(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Создать отзыв на товар
+    Создать отзыв на магазин
 
     Требуется авторизация
+    Каждый пользователь может оставить только один отзыв на магазин
     """
-    # Проверить существование товара
-    product_result = await db.execute(
-        select(Product).where(Product.id == review_data.product_id)
-    )
-    product = product_result.scalar_one_or_none()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-
-    # Проверить что пользователь еще не оставлял отзыв на этот товар
+    # Проверить что пользователь еще не оставлял отзыв на магазин
     existing_review_result = await db.execute(
-        select(Review).where(
-            and_(
-                Review.product_id == review_data.product_id,
-                Review.user_id == current_user.id
-            )
-        )
+        select(Review).where(Review.user_id == current_user.id)
     )
     existing_review = existing_review_result.scalar_one_or_none()
     if existing_review:
         raise HTTPException(
             status_code=400,
-            detail="You have already reviewed this product. Use PUT to update your review."
+            detail="You have already reviewed this shop. Use PUT to update your review."
         )
 
     # Создать отзыв (со статусом pending - ожидает модерации)
     review = Review(
-        product_id=review_data.product_id,
         user_id=current_user.id,
         rating=review_data.rating,
         comment=review_data.comment,
         status="pending"
     )
     db.add(review)
-
-    # Обновить рейтинг товара
-    await update_product_rating(db, review_data.product_id)
 
     await db.commit()
     await db.refresh(review)
@@ -296,7 +241,7 @@ async def update_review(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Обновить свой отзыв
+    Обновить свой отзыв на магазин
 
     Требуется авторизация
     """
@@ -322,9 +267,6 @@ async def update_review(
     # После редактирования отзыв снова отправляется на модерацию
     review.status = "pending"
 
-    # Обновить рейтинг товара
-    await update_product_rating(db, review.product_id)
-
     await db.commit()
     await db.refresh(review)
 
@@ -341,7 +283,7 @@ async def delete_review(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Удалить свой отзыв
+    Удалить свой отзыв на магазин
 
     Требуется авторизация
     """
@@ -358,51 +300,10 @@ async def delete_review(
         raise HTTPException(
             status_code=403, detail="You can only delete your own reviews")
 
-    product_id = review.product_id
-
     # Удалить отзыв
     await db.delete(review)
-
-    # Обновить рейтинг товара
-    await update_product_rating(db, product_id)
 
     await db.commit()
 
     return {"ok": True, "message": "Review deleted successfully"}
-
-
-# ==================== HELPER FUNCTIONS ====================
-
-async def update_product_rating(db: AsyncSession, product_id: int):
-    """
-    Обновить средний рейтинг и количество отзывов у товара (только одобренные)
-    """
-    # Посчитать средний рейтинг и количество отзывов (только одобренные)
-    stats_result = await db.execute(
-        select(
-            func.avg(Review.rating).label('avg_rating'),
-            func.count(Review.id).label('count')
-        )
-        .where(
-            and_(
-                Review.product_id == product_id,
-                Review.status == "approved"
-            )
-        )
-    )
-    stats = stats_result.first()
-
-    # Обновить товар
-    product_result = await db.execute(
-        select(Product).where(Product.id == product_id)
-    )
-    product = product_result.scalar_one()
-
-    if stats.avg_rating is not None:
-        product.average_rating = Decimal(
-            str(round(float(stats.avg_rating), 2)))
-        product.reviews_count = stats.count
-    else:
-        product.average_rating = Decimal('0')
-        product.reviews_count = 0
 
