@@ -119,8 +119,6 @@ class Product(Base):
     category = relationship("Category", back_populates="products")
     section = relationship("Section")
     badge = relationship("Badge")
-    reviews = relationship(
-        "Review", back_populates="product", cascade="all, delete-orphan")
 
 
 class Badge(Base):
@@ -270,12 +268,10 @@ class SiteSettings(Base):
 
 
 class Review(Base):
-    """Отзывы на товары"""
+    """Отзывы на магазин (общие для всех товаров)"""
     __tablename__ = "reviews"
 
     id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey(
-        "products.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey(
         "users.id", ondelete="CASCADE"), nullable=False)
     rating = Column(Integer, nullable=False)  # От 1 до 5 звёзд
@@ -286,7 +282,6 @@ class Review(Base):
                         onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
-    product = relationship("Product", back_populates="reviews")
     user = relationship("User")
 
 

@@ -1,5 +1,5 @@
 """
-Административные эндпоинты для модерации отзывов
+Административные эндпоинты для модерации отзывов (отзывы относятся ко всему магазину)
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from core.db.session import get_db
-from core.db.models import Review, Product, User
+from core.db.models import Review, User
 from core.dependencies import get_admin_user
 
 router = APIRouter()
@@ -29,21 +29,9 @@ class ReviewUserInfo(BaseModel):
         from_attributes = True
 
 
-class ProductInfo(BaseModel):
-    """Информация о товаре"""
-    id: int
-    title: str
-    slug: str
-
-    class Config:
-        from_attributes = True
-
-
 class AdminReviewResponse(BaseModel):
     """Отзыв для админ-панели"""
     id: int
-    product_id: int
-    product: ProductInfo
     user: ReviewUserInfo
     rating: int
     comment: Optional[str] = None
@@ -71,7 +59,7 @@ async def admin_get_reviews(
     admin: User = Depends(get_admin_user)
 ):
     """
-    Получить все отзывы для модерации
+    Получить все отзывы на магазин для модерации
     Можно фильтровать по статусу
     """
     query = select(Review)
@@ -86,36 +74,22 @@ async def admin_get_reviews(
     result = await db.execute(query)
     reviews = result.scalars().all()
 
-    # Загрузить пользователей и товары
+    # Загрузить пользователей
     if reviews:
         user_ids = [review.user_id for review in reviews]
-        product_ids = [review.product_id for review in reviews]
 
         users_result = await db.execute(
             select(User).where(User.id.in_(user_ids))
         )
         users_dict = {user.id: user for user in users_result.scalars().all()}
 
-        products_result = await db.execute(
-            select(Product).where(Product.id.in_(product_ids))
-        )
-        products_dict = {
-            product.id: product for product in products_result.scalars().all()}
-
-        # Привязать к отзывам
+        # Привязать пользователей к отзывам
         for review in reviews:
             review.user = users_dict.get(review.user_id)
-            review.product = products_dict.get(review.product_id)
 
     return [
         AdminReviewResponse(
             id=review.id,
-            product_id=review.product_id,
-            product=ProductInfo(
-                id=review.product.id,
-                title=review.product.title,
-                slug=review.product.slug
-            ) if review.product else None,
             user=ReviewUserInfo.from_orm(
                 review.user) if review.user else None,
             rating=review.rating,
@@ -159,7 +133,7 @@ async def admin_moderate_review(
     admin: User = Depends(get_admin_user)
 ):
     """
-    Модерировать отзыв (одобрить или отклонить)
+    Модерировать отзыв на магазин (одобрить или отклонить)
     """
     if action.action not in ["approve", "reject"]:
         raise HTTPException(
@@ -181,12 +155,6 @@ async def admin_moderate_review(
         review.status = "rejected"
 
     await db.commit()
-
-    # Обновить рейтинг товара (пересчитать с учетом нового статуса)
-    from apps.api.routes.reviews import update_product_rating
-    await update_product_rating(db, review.product_id)
-    await db.commit()
-
     await db.refresh(review)
 
     return {"ok": True, "review_id": review.id, "new_status": review.status}
@@ -199,7 +167,7 @@ async def admin_delete_review(
     admin: User = Depends(get_admin_user)
 ):
     """
-    Удалить отзыв (админ может удалять любые отзывы)
+    Удалить отзыв на магазин (админ может удалять любые отзывы)
     """
     review_result = await db.execute(
         select(Review).where(Review.id == review_id)
@@ -209,14 +177,7 @@ async def admin_delete_review(
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
 
-    product_id = review.product_id
-
     await db.delete(review)
-    await db.commit()
-
-    # Обновить рейтинг товара
-    from apps.api.routes.reviews import update_product_rating
-    await update_product_rating(db, product_id)
     await db.commit()
 
     return {"ok": True, "message": "Review deleted successfully"}
