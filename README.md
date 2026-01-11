@@ -893,7 +893,7 @@ OWNER_TG_IDS=123456789,987654321
 **Способ 2: Через базу данных**
 
 ```sql
-UPDATE users SET is_admin = true WHERE telegram_id = 123456789;
+  UPDATE users SET is_admin = true WHERE telegram_id = 123456789;
 ```
 
 ### Основные эндпоинты
