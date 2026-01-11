@@ -34,6 +34,9 @@ def get_admin_menu_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="📢 Сделать рассылку", callback_data="admin_broadcast"),
             ],
+            [
+                InlineKeyboardButton(text="💬 Установить текст для канала", callback_data="admin_channel_text"),
+            ],
         ]
     )
     return keyboard
