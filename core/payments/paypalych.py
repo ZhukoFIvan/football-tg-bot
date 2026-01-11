@@ -111,8 +111,9 @@ class PaypalychProvider(PaymentProvider):
                 # ВАЖНО: result_url - URL для postback уведомлений от Paypalych
                 from core.config import settings
                 result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/paypalych"
-                success_url = f"{settings.API_PUBLIC_URL}/api/payments/success?order_id={order_id}"
-                fail_url = f"{settings.API_PUBLIC_URL}/api/payments/fail?order_id={order_id}"
+                # Frontend страницы результатов (не API, а Next.js)
+                success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}"
+                fail_url = f"{settings.FRONTEND_URL}/payments/failed?order_id={order_id}"
                 
                 data_form = aiohttp.FormData()
                 data_form.add_field("amount", str(float(amount)))
