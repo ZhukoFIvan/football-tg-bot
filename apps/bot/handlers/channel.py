@@ -21,6 +21,8 @@ async def handle_channel_post(message: Message, bot: Bot):
     Отправляет комментарий в группу обсуждений канала
     """
     try:
+        logger.info(f"Получен пост в канале: {message.chat.id}, message_id: {message.message_id}")
+        
         # Получаем настройки из БД
         async with AsyncSessionLocal() as session:
             # Получаем ID канала
@@ -42,6 +44,8 @@ async def handle_channel_post(message: Message, bot: Bot):
             configured_channel_id = str(channel_setting.value)
             comment_text = text_setting.value
             
+            logger.info(f"Настроенный канал: {configured_channel_id}, текущий: {message.chat.id}")
+            
             # Проверяем, что пост из настроенного канала
             current_channel_id = str(message.chat.id)
             
@@ -51,61 +55,67 @@ async def handle_channel_post(message: Message, bot: Bot):
             
             # Получаем информацию о канале и связанной группе обсуждений
             try:
-                chat = await bot.get_chat(message.chat.id)
+                logger.info(f"Получаем информацию о канале {message.chat.id}")
                 
-                # Проверяем, есть ли связанная группа обсуждений
-                # В aiogram 3.x linked_chat может быть доступен через chat.linked_chat или через get_chat
+                # В aiogram 3.x для получения linked_chat нужно использовать get_chat с правильными параметрами
+                # Но linked_chat может быть недоступен в объекте Chat
+                # Используем альтернативный способ - пытаемся найти группу обсуждений через forward_from_chat
+                # или используем get_chat_member для проверки прав бота в группе
+                
                 linked_chat_id = None
                 
-                # Пробуем получить linked_chat_id разными способами
-                if hasattr(chat, 'linked_chat') and chat.linked_chat:
-                    linked_chat_id = chat.linked_chat.id
-                elif hasattr(chat, 'linked_chat_id') and chat.linked_chat_id:
-                    linked_chat_id = chat.linked_chat_id
-                else:
-                    # Пробуем получить через API напрямую
-                    try:
-                        full_chat = await bot.get_chat(message.chat.id)
-                        if hasattr(full_chat, 'linked_chat_id'):
-                            linked_chat_id = full_chat.linked_chat_id
-                    except:
-                        pass
+                # Пробуем получить linked_chat_id через get_chat
+                try:
+                    chat = await bot.get_chat(message.chat.id)
+                    logger.info(f"Информация о канале получена: {chat}")
+                    
+                    # В aiogram 3.x linked_chat может быть в разных местах
+                    if hasattr(chat, 'linked_chat') and chat.linked_chat:
+                        linked_chat_id = chat.linked_chat.id
+                        logger.info(f"Найден linked_chat через chat.linked_chat: {linked_chat_id}")
+                    elif hasattr(chat, 'linked_chat_id') and chat.linked_chat_id:
+                        linked_chat_id = chat.linked_chat_id
+                        logger.info(f"Найден linked_chat_id через chat.linked_chat_id: {linked_chat_id}")
+                except Exception as chat_error:
+                    logger.error(f"Ошибка при получении информации о канале: {chat_error}")
                 
-                if linked_chat_id:
-                    logger.info(f"Найдена группа обсуждений: {linked_chat_id}")
-                    
-                    # Задержка, чтобы пост успел появиться в группе обсуждений
-                    # Telegram создает топик в группе обсуждений для каждого поста в канале
-                    await asyncio.sleep(10)  # 10 секунд задержки
-                    
-                    # В группах обсуждений message_thread_id = message_id поста в канале
-                    # Это привязывает комментарий к конкретному посту (топику)
+                # Если linked_chat_id не найден, возможно канал не имеет связанной группы
+                if not linked_chat_id:
+                    logger.warning(f"Не удалось найти linked_chat_id для канала {message.chat.id}")
+                    logger.warning("Убедитесь, что канал имеет связанную группу обсуждений")
+                    return
+                
+                logger.info(f"Найдена группа обсуждений: {linked_chat_id}")
+                logger.info(f"Текст комментария: {comment_text[:50]}...")
+                
+                # Отправляем комментарий сразу же без задержки
+                # В группах обсуждений для комментариев к посту нужно использовать message_thread_id
+                # message_thread_id должен быть равен message_id поста в канале
+                try:
+                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} с thread_id {message.message_id}")
+                    await bot.send_message(
+                        chat_id=linked_chat_id,
+                        text=comment_text,
+                        message_thread_id=message.message_id,  # Это создает комментарий к посту
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"✅ Комментарий успешно отправлен в группу обсуждений {linked_chat_id} для поста {message.message_id}")
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке комментария с thread_id: {e}", exc_info=True)
+                    # Если не получилось с thread_id, пробуем без него (fallback)
                     try:
+                        logger.info("Пробую отправить комментарий без thread_id")
                         await bot.send_message(
                             chat_id=linked_chat_id,
                             text=comment_text,
-                            message_thread_id=message.message_id,  # Привязываем к посту через thread_id
                             parse_mode="HTML"
                         )
-                        logger.info(f"Комментарий успешно отправлен в группу обсуждений {linked_chat_id} для поста {message.message_id}")
-                    except Exception as e:
-                        logger.error(f"Ошибка при отправке комментария в группу обсуждений (с thread_id): {e}")
-                        # Если не получилось с thread_id, пробуем без него (fallback)
-                        try:
-                            await asyncio.sleep(1)  # Еще секунда перед повторной попыткой
-                            await bot.send_message(
-                                chat_id=linked_chat_id,
-                                text=comment_text,
-                                parse_mode="HTML"
-                            )
-                            logger.info(f"Комментарий отправлен в группу обсуждений без thread_id (fallback)")
-                        except Exception as e2:
-                            logger.error(f"Ошибка при отправке комментария без thread_id: {e2}")
-                else:
-                    logger.warning(f"У канала {message.chat.id} нет связанной группы обсуждений")
+                        logger.info(f"✅ Комментарий отправлен в группу обсуждений без thread_id")
+                    except Exception as e2:
+                        logger.error(f"Ошибка при отправке комментария без thread_id: {e2}", exc_info=True)
                     
             except Exception as e:
-                logger.error(f"Ошибка при получении информации о канале: {e}")
+                logger.error(f"Ошибка при получении информации о канале: {e}", exc_info=True)
                 
     except Exception as e:
         logger.error(f"Ошибка в обработчике постов канала: {e}")
