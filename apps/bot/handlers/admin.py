@@ -305,14 +305,15 @@ async def process_channel_id(message: Message, state: FSMContext, bot: Bot):
         
     except Exception as e:
         logger.error(f"Ошибка при проверке канала: {e}", exc_info=True)
-        error_msg = str(e).replace("<", "&lt;").replace(">", "&gt;")
+        error_msg = str(e)[:200]  # Ограничиваем длину ошибки до 200 символов
+        error_msg = error_msg.replace("<", "&lt;").replace(">", "&gt;")
         await message.answer(
-            f"❌ Не удалось найти канал или бот не имеет доступа.\n\n"
+            "❌ Не удалось найти канал или бот не имеет доступа.\n\n"
             f"Ошибка: <code>{error_msg}</code>\n\n"
             "Убедитесь, что:\n"
-            "1. ID/username указан правильно\n"
-            "2. Бот добавлен в канал как администратор\n"
-            "3. У бота есть право комментирования",
+            "• ID/username указан правильно\n"
+            "• Бот добавлен в канал как администратор\n"
+            "• У бота есть право комментирования",
             reply_markup=get_channel_text_cancel_keyboard(),
             parse_mode="HTML"
         )
