@@ -3,7 +3,7 @@
 """
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import Message, FSInputFile, URLInputFile
+from aiogram.types import Message, FSInputFile, URLInputFile, ReplyKeyboardRemove
 import os
 
 from core.config import settings
@@ -26,12 +26,16 @@ async def cmd_start(message: Message):
     # Путь к изображению приветствия
     photo_path = "uploads/welcome.jpg"
     
+    # Удаляем главную клавиатуру (если она была)
+    remove_keyboard = ReplyKeyboardRemove(remove_keyboard=True)
+    
     # Сначала пробуем локальный файл
     if os.path.exists(photo_path):
         photo = FSInputFile(photo_path)
         await message.answer_photo(
             photo=photo,
             caption=welcome_text,
+            reply_markup=remove_keyboard,
             parse_mode="HTML"
         )
     # Если локального файла нет, пробуем загрузить с сервера
@@ -42,17 +46,20 @@ async def cmd_start(message: Message):
             await message.answer_photo(
                 photo=photo,
                 caption=welcome_text,
+                reply_markup=remove_keyboard,
                 parse_mode="HTML"
             )
         except:
             # Если не получилось загрузить фото, отправляем просто текст
             await message.answer(
                 welcome_text,
+                reply_markup=remove_keyboard,
                 parse_mode="HTML"
             )
     else:
         # Если фото нет, отправляем просто текст
         await message.answer(
             welcome_text,
+            reply_markup=remove_keyboard,
             parse_mode="HTML"
         )
