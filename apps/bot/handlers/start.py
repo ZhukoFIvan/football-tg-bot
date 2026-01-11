@@ -6,7 +6,6 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, FSInputFile, URLInputFile
 import os
 
-from apps.bot.keyboards import get_main_keyboard
 from core.config import settings
 
 router = Router()
@@ -19,13 +18,13 @@ async def cmd_start(message: Message):
     """
     welcome_text = """<b>Что умеет бот?</b>
 
-🤩 В магазине ROMIX STORE ты сможешь задонатить быстро, а главное безопасно в FC MOBILE
+💎 В магазине NOONYA SHOP ты сможешь задонатить быстро, а главное безопасно в FC MOBILE!
 
 Связь с поддержкой
-@romixstore_support"""
+@noonyashop_support"""
 
     # Путь к изображению приветствия
-    photo_path = "uploads/welcomeRoma.JPG"
+    photo_path = "uploads/welcome.jpg"
     
     # Сначала пробуем локальный файл
     if os.path.exists(photo_path):
@@ -33,31 +32,27 @@ async def cmd_start(message: Message):
         await message.answer_photo(
             photo=photo,
             caption=welcome_text,
-            reply_markup=get_main_keyboard(),
             parse_mode="HTML"
         )
     # Если локального файла нет, пробуем загрузить с сервера
     elif settings.API_PUBLIC_URL:
         try:
-            photo_url = f"{settings.API_PUBLIC_URL}/uploads/welcomeRoma.JPG"
+            photo_url = f"{settings.API_PUBLIC_URL}/uploads/welcome.jpg"
             photo = URLInputFile(photo_url)
             await message.answer_photo(
                 photo=photo,
                 caption=welcome_text,
-                reply_markup=get_main_keyboard(),
                 parse_mode="HTML"
             )
         except:
             # Если не получилось загрузить фото, отправляем просто текст
             await message.answer(
                 welcome_text,
-                reply_markup=get_main_keyboard(),
                 parse_mode="HTML"
             )
     else:
         # Если фото нет, отправляем просто текст
         await message.answer(
             welcome_text,
-            reply_markup=get_main_keyboard(),
             parse_mode="HTML"
         )
