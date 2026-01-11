@@ -44,7 +44,7 @@ class BonusTransactionResponse(BaseModel):
 
 class BonusMilestonesResponse(BaseModel):
     """Информация о порогах начисления бонусов"""
-    milestones: dict  # {1: 500, 3: 250, ...}
+    milestones: dict  # {1: {"bonus": 50, "description": "50 ₽ на баланс"}, ...}
     bonus_rate: float  # 0.05 = 5%
     max_usage_percent: float  # 0.50 = 50%
 
@@ -103,8 +103,35 @@ async def get_bonus_milestones():
     """
     Получить информацию о системе начисления бонусов
     """
+    # Описания наград
+    milestone_descriptions = {
+        1: "50 ₽ на баланс",
+        3: "75 ₽ на баланс",
+        5: "Усилитель B",
+        10: "100 ₽ на баланс",
+        15: "150 ₽ на баланс",
+        20: "Усилитель D",
+        25: "300 ₽ на баланс",
+        30: "Скидка 5%",
+        50: "Любой абонемент",
+        60: "350 ₽ на баланс",
+        70: "400 ₽ на баланс",
+        80: "450 ₽ на баланс",
+        90: "500 ₽ на баланс",
+        100: "20 000 FC Points",
+    }
+
+    # Преобразуем милестоуны в формат с описаниями
+    milestones_with_descriptions = {
+        orders: {
+            "bonus": bonus,
+            "description": milestone_descriptions.get(orders, f"{bonus} ₽ на баланс")
+        }
+        for orders, bonus in BonusSystem.BONUS_MILESTONES.items()
+    }
+
     return BonusMilestonesResponse(
-        milestones=BonusSystem.BONUS_MILESTONES,
+        milestones=milestones_with_descriptions,
         bonus_rate=BonusSystem.BONUS_RATE,
         max_usage_percent=BonusSystem.MAX_BONUS_USAGE_PERCENT
     )

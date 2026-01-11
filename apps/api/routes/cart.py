@@ -60,11 +60,20 @@ class UpdateCartItemRequest(BaseModel):
     quantity: int
 
 
+class AccountInfo(BaseModel):
+    """Информация об игровом аккаунте"""
+    account_type: str  # "EA", "Facebook", "Google"
+    account_email: str  # Email или email/phone для Facebook
+    account_password: str | None = None  # Опционально для EA
+    account_name: str  # Имя аккаунта
+
+
 class CreatePaymentRequest(BaseModel):
     """Создать платеж для корзины"""
     payment_method: str  # "card" для карты, "sbp" для СБП (провайдер выбирается автоматически)
     promo_code: str | None = None
     bonus_to_use: int = 0
+    account_info: AccountInfo  # Данные игрового аккаунта (обязательно)
 
 
 class PaymentResponse(BaseModel):
@@ -344,6 +353,44 @@ async def create_payment(
             detail=f"Invalid payment method. Supported: card, sbp"
         )
 
+    # Валидация данных аккаунта
+    account_info = request.account_info
+    if account_info.account_type not in ["EA", "Facebook", "Google"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid account type. Supported: EA, Facebook, Google"
+        )
+
+    # Проверка обязательных полей
+    if not account_info.account_email or not account_info.account_email.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Account email is required"
+        )
+
+    if not account_info.account_name or not account_info.account_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Account name is required"
+        )
+
+    # Для Facebook и Google пароль обязателен
+    if account_info.account_type in ["Facebook", "Google"] and not account_info.account_password:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password is required for {account_info.account_type} accounts"
+        )
+
+    # Базовая валидация email (для EA и Google)
+    if account_info.account_type in ["EA", "Google"]:
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, account_info.account_email):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid email format"
+            )
+
     # Получить корзину с товарами
     result = await db.execute(
         select(Cart)
@@ -452,7 +499,12 @@ async def create_payment(
         bonus_used=bonus_used,  # Использовано бонусов
         bonus_earned=earned_bonuses,  # Начислено бонусов
         final_amount=final_amount,  # Итоговая сумма к оплате
-        currency="RUB"
+        currency="RUB",
+        # Account information
+        account_type=account_info.account_type,
+        account_email=account_info.account_email,
+        account_password=account_info.account_password,
+        account_name=account_info.account_name
     )
     db.add(order)
     await db.flush()

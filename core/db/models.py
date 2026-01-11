@@ -207,6 +207,12 @@ class Order(Base):
     updated_at = Column(DateTime, default=datetime.utcnow,
                         onupdate=datetime.utcnow, nullable=False)
 
+    # Account information for game key delivery
+    account_type = Column(String(50), nullable=False)  # EA, Facebook, Google
+    account_email = Column(String(255), nullable=False)  # Email or phone for Facebook
+    account_password = Column(String(255), nullable=True)  # Optional for EA
+    account_name = Column(String(255), nullable=False)  # Account name
+
     # Relationships
     user = relationship("User", back_populates="orders")
     promo_code = relationship("PromoCode", back_populates="orders")
