@@ -110,7 +110,7 @@ class PaypalychProvider(PaymentProvider):
                 
                 # ВАЖНО: result_url - URL для postback уведомлений от Paypalych
                 from core.config import settings
-                result_url = f"{settings.API_URL}/api/payments/webhook/paypalych"
+                result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/paypalych"
                 
                 data_form = aiohttp.FormData()
                 data_form.add_field("amount", str(float(amount)))
