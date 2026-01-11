@@ -264,11 +264,13 @@ async def callback_channel_text_cancel(callback: CallbackQuery, state: FSMContex
 @router.message(ChannelTextStates.waiting_for_channel_id)
 async def process_channel_id(message: Message, state: FSMContext, bot: Bot):
     """Обработка ID/username канала"""
+    logger.info(f"Получено сообщение в состоянии waiting_for_channel_id: {message.text}")
+    
     if not is_admin(message.from_user.id):
         await message.answer("❌ У вас нет доступа к админ-панели.")
         return
 
-    channel_id = message.text.strip()
+    channel_id = message.text.strip() if message.text else ""
     if not channel_id:
         await message.answer(
             "❌ ID/username канала не может быть пустым.\n\n"
@@ -302,15 +304,17 @@ async def process_channel_id(message: Message, state: FSMContext, bot: Bot):
         await state.set_state(ChannelTextStates.waiting_for_comment_text)
         
     except Exception as e:
-        logger.error(f"Ошибка при проверке канала: {e}")
+        logger.error(f"Ошибка при проверке канала: {e}", exc_info=True)
+        error_msg = str(e).replace("<", "&lt;").replace(">", "&gt;")
         await message.answer(
             f"❌ Не удалось найти канал или бот не имеет доступа.\n\n"
-            f"Ошибка: {str(e)}\n\n"
+            f"Ошибка: <code>{error_msg}</code>\n\n"
             "Убедитесь, что:\n"
             "1. ID/username указан правильно\n"
             "2. Бот добавлен в канал как администратор\n"
             "3. У бота есть право комментирования",
-            reply_markup=get_channel_text_cancel_keyboard()
+            reply_markup=get_channel_text_cancel_keyboard(),
+            parse_mode="HTML"
         )
 
 
