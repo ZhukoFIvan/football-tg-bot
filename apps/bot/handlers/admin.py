@@ -281,25 +281,43 @@ async def process_channel_id(message: Message, state: FSMContext, bot: Bot):
 
     # Проверяем, что бот может отправлять сообщения в канал
     try:
-        chat = await bot.get_chat(channel_id)
-        # Проверяем права бота
-        bot_member = await bot.get_chat_member(chat.id, bot.id)
+        # Получаем информацию о канале (может быть ошибка парсинга, игнорируем её)
+        try:
+            chat = await bot.get_chat(channel_id)
+            chat_title = chat.title if hasattr(chat, 'title') else channel_id
+        except Exception as chat_error:
+            logger.warning(f"Не удалось получить полную информацию о канале: {chat_error}")
+            # Используем ID как fallback
+            chat_title = channel_id
+            # Для ID канала нужен объект с id
+            class SimpleChat:
+                def __init__(self, chat_id):
+                    self.id = int(chat_id)
+            chat = SimpleChat(channel_id)
         
-        if not bot_member.can_post_messages:
-            await message.answer(
-                f"❌ Бот не имеет прав на отправку сообщений в канале {chat.title}.\n\n"
-                "Сделайте бота администратором с правом комментирования!",
-                reply_markup=get_channel_text_cancel_keyboard()
-            )
-            return
+        # Проверяем, что бот является участником канала (администратором)
+        try:
+            bot_member = await bot.get_chat_member(chat.id, bot.id)
+            # Проверяем, что бот является администратором (не нужно проверять can_post_messages для комментариев)
+            if bot_member.status not in ["administrator", "creator"]:
+                await message.answer(
+                    f"❌ Бот не является администратором канала.\n\n"
+                    "Сделайте бота администратором канала с правом комментирования!",
+                    reply_markup=get_channel_text_cancel_keyboard()
+                )
+                return
+        except Exception as member_error:
+            logger.warning(f"Не удалось проверить права бота: {member_error}")
+            # Продолжаем, если не можем проверить права (может быть ошибка API)
             
         await state.update_data(channel_id=str(chat.id))
         
         await message.answer(
-            f"✅ Канал найден: <b>{chat.title}</b>\n\n"
+            f"✅ Канал найден: <b>{chat_title}</b>\n\n"
             "Теперь отправьте текст, который бот будет оставлять в комментариях к каждому новому посту.\n\n"
             "<i>Вы можете использовать HTML разметку для форматирования текста.</i>",
-            reply_markup=get_channel_text_cancel_keyboard()
+            reply_markup=get_channel_text_cancel_keyboard(),
+            parse_mode="HTML"
         )
         await state.set_state(ChannelTextStates.waiting_for_comment_text)
         
