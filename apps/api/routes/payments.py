@@ -109,12 +109,6 @@ async def notify_admins_about_purchase(
 📦 <b>Заказ #{order.id}</b>
 {items_text}
 
-🎮 <b>Данные аккаунта:</b>
-   • Тип: {order.account_type}
-   • Email/Phone: <code>{order.account_email}</code>
-   • Имя аккаунта: <code>{order.account_name}</code>
-{f'   • Пароль: <code>{order.account_password}</code>' if order.account_password else ''}
-
 💰 <b>Сумма заказа:</b> {float(order.final_amount):,.2f} ₽
 💳 <b>Способ оплаты:</b> {payment.provider if payment else 'Не указан'} - {payment.payment_method if payment else ''}
 🎁 <b>Бонусы использовано:</b> {float(order.bonus_used):,.2f} ₽

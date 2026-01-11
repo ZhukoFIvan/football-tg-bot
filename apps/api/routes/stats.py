@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, distinct
+from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from typing import Optional
 
@@ -248,24 +249,24 @@ async def get_revenue_stats(
 
     # Общая выручка
     total_revenue = await db.scalar(
-        select(func.sum(Order.amount)).where(paid_condition)
+        select(func.sum(Order.final_amount)).where(paid_condition)
     ) or 0.0
 
     # По периодам
     revenue_today = await db.scalar(
-        select(func.sum(Order.amount)).where(
+        select(func.sum(Order.final_amount)).where(
             and_(paid_condition, Order.created_at >= today_start)
         )
     ) or 0.0
 
     revenue_this_week = await db.scalar(
-        select(func.sum(Order.amount)).where(
+        select(func.sum(Order.final_amount)).where(
             and_(paid_condition, Order.created_at >= week_start)
         )
     ) or 0.0
 
     revenue_this_month = await db.scalar(
-        select(func.sum(Order.amount)).where(
+        select(func.sum(Order.final_amount)).where(
             and_(paid_condition, Order.created_at >= month_start)
         )
     ) or 0.0
@@ -408,6 +409,7 @@ async def get_recent_orders(
 
     result = await db.execute(
         select(Order)
+        .options(selectinload(Order.items))
         .order_by(Order.created_at.desc())
         .limit(limit)
     )
@@ -417,11 +419,12 @@ async def get_recent_orders(
         {
             "id": order.id,
             "user_id": order.user_id,
-            "product_id": order.product_id,
             "status": order.status,
-            "amount": float(order.amount),
+            "total_amount": float(order.total_amount),
+            "final_amount": float(order.final_amount),
             "currency": order.currency,
-            "created_at": order.created_at
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+            "items_count": len(order.items) if hasattr(order, 'items') else 0
         }
         for order in orders
     ]
