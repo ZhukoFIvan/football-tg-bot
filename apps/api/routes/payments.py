@@ -73,7 +73,8 @@ async def send_telegram_notification(
 async def notify_admins_about_purchase(
     user: User,
     order: Order,
-    order_items: list
+    order_items: list,
+    payment: Payment = None
 ):
     """
     Отправить уведомление админам о новой покупке
@@ -82,6 +83,7 @@ async def notify_admins_about_purchase(
         user: Объект пользователя
         order: Объект заказа
         order_items: Список товаров в заказе
+        payment: Объект платежа (опционально)
     """
     admin_ids = settings.owner_ids
     if not admin_ids:
@@ -107,7 +109,7 @@ async def notify_admins_about_purchase(
 {items_text}
 
 💰 <b>Сумма заказа:</b> {float(order.final_amount):,.2f} ₽
-💳 <b>Способ оплаты:</b> {order.payment_method}
+💳 <b>Способ оплаты:</b> {payment.provider if payment else 'Не указан'} - {payment.payment_method if payment else ''}
 🎁 <b>Бонусы использовано:</b> {float(order.bonus_used):,.2f} ₽
 ✨ <b>Бонусы начислено:</b> {float(order.bonus_earned):,.2f} ₽
 
@@ -201,7 +203,7 @@ async def update_payment_status(
                 
                 # Отправить уведомление админам о покупке
                 if user and order.items:
-                    await notify_admins_about_purchase(user, order, order.items)
+                    await notify_admins_about_purchase(user, order, order.items, payment)
                     
         elif status == "cancelled" or status == "failed":
             if order.status == "pending":
