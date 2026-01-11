@@ -38,6 +38,13 @@ async def main():
     logger.info(f"👤 Owner IDs: {settings.owner_ids}")
 
     try:
+        # Удаляем webhook, если он активен (для работы в режиме polling)
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ Webhook удален, переходим на polling")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось удалить webhook (возможно, его нет): {e}")
+        
         # Запуск polling
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
