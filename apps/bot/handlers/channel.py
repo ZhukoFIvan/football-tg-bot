@@ -2,6 +2,7 @@
 Обработчик автоматических комментариев в группе обсуждений канала
 """
 import logging
+import asyncio
 from aiogram import Router, Bot
 from aiogram.types import Message
 from sqlalchemy import select
@@ -73,17 +74,33 @@ async def handle_channel_post(message: Message, bot: Bot):
                 if linked_chat_id:
                     logger.info(f"Найдена группа обсуждений: {linked_chat_id}")
                     
-                    # Отправляем комментарий в группу обсуждений
-                    # В группах обсуждений сообщения отображаются как комментарии к постам
+                    # Задержка, чтобы пост успел появиться в группе обсуждений
+                    # Telegram создает топик в группе обсуждений для каждого поста в канале
+                    await asyncio.sleep(2)  # 2 секунды задержки для надежности
+                    
+                    # В группах обсуждений message_thread_id = message_id поста в канале
+                    # Это привязывает комментарий к конкретному посту (топику)
                     try:
                         await bot.send_message(
                             chat_id=linked_chat_id,
                             text=comment_text,
+                            message_thread_id=message.message_id,  # Привязываем к посту через thread_id
                             parse_mode="HTML"
                         )
                         logger.info(f"Комментарий успешно отправлен в группу обсуждений {linked_chat_id} для поста {message.message_id}")
                     except Exception as e:
-                        logger.error(f"Ошибка при отправке комментария в группу обсуждений: {e}")
+                        logger.error(f"Ошибка при отправке комментария в группу обсуждений (с thread_id): {e}")
+                        # Если не получилось с thread_id, пробуем без него (fallback)
+                        try:
+                            await asyncio.sleep(1)  # Еще секунда перед повторной попыткой
+                            await bot.send_message(
+                                chat_id=linked_chat_id,
+                                text=comment_text,
+                                parse_mode="HTML"
+                            )
+                            logger.info(f"Комментарий отправлен в группу обсуждений без thread_id (fallback)")
+                        except Exception as e2:
+                            logger.error(f"Ошибка при отправке комментария без thread_id: {e2}")
                 else:
                     logger.warning(f"У канала {message.chat.id} нет связанной группы обсуждений")
                     
