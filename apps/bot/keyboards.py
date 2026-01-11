@@ -51,3 +51,15 @@ def get_broadcast_cancel_keyboard() -> InlineKeyboardMarkup:
         ]
     )
     return keyboard
+
+
+def get_channel_text_cancel_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для отмены установки текста канала"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="❌ Отменить", callback_data="channel_text_cancel"),
+            ]
+        ]
+    )
+    return keyboard

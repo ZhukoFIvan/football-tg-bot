@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, insert, update
 
-from apps.bot.keyboards import get_admin_menu_keyboard, get_broadcast_cancel_keyboard
+from apps.bot.keyboards import get_admin_menu_keyboard, get_broadcast_cancel_keyboard, get_channel_text_cancel_keyboard
 from core.config import settings
 from core.db.session import AsyncSessionLocal
 from core.db.models import User, SiteSettings
@@ -240,7 +240,7 @@ async def callback_channel_text_start(callback: CallbackQuery, state: FSMContext
         "Отправьте ID или @username канала, в котором бот будет оставлять комментарии.\n\n"
         "<i>Например: @your_channel или -1001234567890</i>\n\n"
         "<b>⚠️ Важно:</b> Бот должен быть администратором канала с правом комментирования!",
-        reply_markup=get_broadcast_cancel_keyboard()
+        reply_markup=get_channel_text_cancel_keyboard()
     )
     await state.set_state(ChannelTextStates.waiting_for_channel_id)
     await callback.answer()
@@ -273,7 +273,7 @@ async def process_channel_id(message: Message, state: FSMContext, bot: Bot):
         await message.answer(
             "❌ ID/username канала не может быть пустым.\n\n"
             "Отправьте ID или @username канала.",
-            reply_markup=get_broadcast_cancel_keyboard()
+            reply_markup=get_channel_text_cancel_keyboard()
         )
         return
 
@@ -287,7 +287,7 @@ async def process_channel_id(message: Message, state: FSMContext, bot: Bot):
             await message.answer(
                 f"❌ Бот не имеет прав на отправку сообщений в канале {chat.title}.\n\n"
                 "Сделайте бота администратором с правом комментирования!",
-                reply_markup=get_broadcast_cancel_keyboard()
+                reply_markup=get_channel_text_cancel_keyboard()
             )
             return
             
@@ -297,7 +297,7 @@ async def process_channel_id(message: Message, state: FSMContext, bot: Bot):
             f"✅ Канал найден: <b>{chat.title}</b>\n\n"
             "Теперь отправьте текст, который бот будет оставлять в комментариях к каждому новому посту.\n\n"
             "<i>Вы можете использовать HTML разметку для форматирования текста.</i>",
-            reply_markup=get_broadcast_cancel_keyboard()
+            reply_markup=get_channel_text_cancel_keyboard()
         )
         await state.set_state(ChannelTextStates.waiting_for_comment_text)
         
@@ -310,7 +310,7 @@ async def process_channel_id(message: Message, state: FSMContext, bot: Bot):
             "1. ID/username указан правильно\n"
             "2. Бот добавлен в канал как администратор\n"
             "3. У бота есть право комментирования",
-            reply_markup=get_broadcast_cancel_keyboard()
+            reply_markup=get_channel_text_cancel_keyboard()
         )
 
 
@@ -326,7 +326,7 @@ async def process_comment_text(message: Message, state: FSMContext):
         await message.answer(
             "❌ Текст комментария не может быть пустым.\n\n"
             "Отправьте текст комментария.",
-            reply_markup=get_broadcast_cancel_keyboard()
+            reply_markup=get_channel_text_cancel_keyboard()
         )
         return
 
