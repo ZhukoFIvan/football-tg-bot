@@ -111,6 +111,8 @@ class PaypalychProvider(PaymentProvider):
                 # ВАЖНО: result_url - URL для postback уведомлений от Paypalych
                 from core.config import settings
                 result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/paypalych"
+                success_url = f"{settings.API_PUBLIC_URL}/api/payments/success?order_id={order_id}"
+                fail_url = f"{settings.API_PUBLIC_URL}/api/payments/fail?order_id={order_id}"
                 
                 data_form = aiohttp.FormData()
                 data_form.add_field("amount", str(float(amount)))
@@ -124,6 +126,8 @@ class PaypalychProvider(PaymentProvider):
                 data_form.add_field("payer_pays_commission", "1")  # 1 = да, 0 = нет
                 data_form.add_field("name", "Платёж")
                 data_form.add_field("result_url", result_url)  # URL для postback
+                data_form.add_field("success_url", success_url)  # URL для успешной оплаты
+                data_form.add_field("fail_url", fail_url)  # URL для неудачной оплаты
                 
                 invoice_url = f"{self.api_url}/api/v1/bill/create"
                 
@@ -139,7 +143,9 @@ class PaypalychProvider(PaymentProvider):
                     f"    - shop_id: '{self.shop_id}' (type: {type(self.shop_id).__name__})\n"
                     f"    - description: {description}\n"
                     f"    - currency_in: {currency.upper()}\n"
-                    f"    - result_url: {result_url}"  # Логируем result_url
+                    f"    - result_url: {result_url}\n"
+                    f"    - success_url: {success_url}\n"
+                    f"    - fail_url: {fail_url}"
                 )
                 
                 async with session.post(

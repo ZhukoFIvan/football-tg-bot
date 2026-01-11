@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     FRONTEND_URL: str = ""  # URL веб-приложения для кнопки в боте
 
+    # Payment redirect settings (in milliseconds)
+    PAYMENT_SUCCESS_REDIRECT_TIMEOUT: int = 2000  # 2 секунды
+    PAYMENT_FAIL_REDIRECT_TIMEOUT: int = 3000     # 3 секунды
+
     # App
     DEBUG: bool = False
 
