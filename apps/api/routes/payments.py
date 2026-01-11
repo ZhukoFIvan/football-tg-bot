@@ -376,7 +376,16 @@ async def paypalych_webhook(
         # Формат postback от Paypalych
         status = data.get("Status")  # "SUCCESS" или "FAIL"
         order_id_str = data.get("InvId")  # order_id в формате строки
-        amount_str = data.get("OutSum")  # сумма
+        
+        # ВАЖНО: OutSum - это сумма С комиссией (то, что заплатил пользователь)
+        # BalanceAmount - это сумма БЕЗ комиссии (то, что придет на баланс)
+        # Используем BalanceAmount для сравнения с суммой в базе
+        balance_amount_str = data.get("BalanceAmount")  # сумма без комиссии
+        out_sum_str = data.get("OutSum")  # сумма с комиссией
+        commission_str = data.get("Commission")  # комиссия
+        
+        amount_str = balance_amount_str or out_sum_str  # Приоритет - BalanceAmount
+        
         bill_id = data.get("TrsId")  # bill_id (ID платежа)
         signature = data.get("SignatureValue")  # подпись
         
@@ -433,9 +442,14 @@ async def paypalych_webhook(
                 raise HTTPException(status_code=400, detail="Invalid signature")
         
         # Проверить сумму (допускаем небольшую погрешность)
+        # Сравниваем с BalanceAmount (сумма без комиссии)
         amount_diff = abs(float(payment.amount) - float(amount))
         if amount_diff > 0.01:  # Разница больше 1 копейки
-            logger.error(f"Неверная сумма для платежа {payment.id}: ожидалось {payment.amount}, получено {amount}")
+            logger.error(
+                f"Неверная сумма для платежа {payment.id}: "
+                f"ожидалось {payment.amount}, получено {amount} "
+                f"(BalanceAmount={balance_amount_str}, OutSum={out_sum_str}, Commission={commission_str})"
+            )
             raise HTTPException(status_code=400, detail="Amount mismatch")
         
         # Обновить статус платежа
