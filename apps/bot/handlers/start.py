@@ -3,9 +3,11 @@
 """
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, FSInputFile, URLInputFile
+import os
 
 from apps.bot.keyboards import get_main_keyboard
+from core.config import settings
 
 router = Router()
 
@@ -15,17 +17,47 @@ async def cmd_start(message: Message):
     """
     Обработчик команды /start
     """
-    user = message.from_user
+    welcome_text = """<b>Что умеет бот?</b>
 
-    welcome_text = f"""
-👋 <b>Привет, {user.first_name}!</b>
+💎 В магазине NOONYA SHOP ты сможешь задонатить быстро, а главное безопасно в FC MOBILE!
 
-Добро пожаловать в магазин игровых ключей!
+Связь с поддержкой
+@noonyashop_support"""
 
-🎮 Здесь вы можете приобрести ключи для популярных игр.
-"""
-
-    await message.answer(
-        welcome_text,
-        reply_markup=get_main_keyboard()
-    )
+    # Путь к изображению приветствия
+    photo_path = "uploads/welcome.jpg"
+    
+    # Сначала пробуем локальный файл
+    if os.path.exists(photo_path):
+        photo = FSInputFile(photo_path)
+        await message.answer_photo(
+            photo=photo,
+            caption=welcome_text,
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML"
+        )
+    # Если локального файла нет, пробуем загрузить с сервера
+    elif settings.API_PUBLIC_URL:
+        try:
+            photo_url = f"{settings.API_PUBLIC_URL}/uploads/welcome.jpg"
+            photo = URLInputFile(photo_url)
+            await message.answer_photo(
+                photo=photo,
+                caption=welcome_text,
+                reply_markup=get_main_keyboard(),
+                parse_mode="HTML"
+            )
+        except:
+            # Если не получилось загрузить фото, отправляем просто текст
+            await message.answer(
+                welcome_text,
+                reply_markup=get_main_keyboard(),
+                parse_mode="HTML"
+            )
+    else:
+        # Если фото нет, отправляем просто текст
+        await message.answer(
+            welcome_text,
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML"
+        )

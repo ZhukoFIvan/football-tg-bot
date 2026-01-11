@@ -102,6 +102,7 @@ async def notify_admins_about_purchase(
 👤 <b>Пользователь:</b>
    • ID: <code>{user.id}</code>
    • Telegram ID: <code>{user.telegram_id}</code>
+   • Telegram User ID: @{user.telegram_id}
    • Username: @{user.username if user.username else 'не указан'}
    • Имя: {user.first_name} {user.last_name or ''}
 
