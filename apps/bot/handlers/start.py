@@ -4,7 +4,7 @@
 import logging
 from aiogram import Router, Bot
 from aiogram.filters import CommandStart
-from aiogram.types import Message, FSInputFile, URLInputFile, ReplyKeyboardRemove
+from aiogram.types import Message, FSInputFile, URLInputFile
 import os
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.db.session import AsyncSessionLocal
 from core.db.models import User
+from apps.bot.keyboards import get_main_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -72,8 +73,8 @@ async def cmd_start(message: Message, bot: Bot):
 @noonyashop_support"""
         photo_path = "uploads/welcome.jpg"
     
-    # Удаляем главную клавиатуру (если она была)
-    remove_keyboard = ReplyKeyboardRemove(remove_keyboard=True)
+    # Добавляем inline-кнопку магазина (будет внизу сообщения)
+    shop_keyboard = get_main_keyboard()
     
     # Сначала пробуем локальный файл
     if os.path.exists(photo_path):
@@ -81,7 +82,7 @@ async def cmd_start(message: Message, bot: Bot):
         await message.answer_photo(
             photo=photo,
             caption=welcome_text,
-            reply_markup=remove_keyboard,
+            reply_markup=shop_keyboard,
             parse_mode="HTML"
         )
     # Если локального файла нет, пробуем загрузить с сервера
@@ -92,20 +93,20 @@ async def cmd_start(message: Message, bot: Bot):
             await message.answer_photo(
                 photo=photo,
                 caption=welcome_text,
-                reply_markup=remove_keyboard,
+                reply_markup=shop_keyboard,
                 parse_mode="HTML"
             )
         except:
             # Если не получилось загрузить фото, отправляем просто текст
             await message.answer(
                 welcome_text,
-                reply_markup=remove_keyboard,
+                reply_markup=shop_keyboard,
                 parse_mode="HTML"
             )
     else:
         # Если фото нет, отправляем просто текст
         await message.answer(
             welcome_text,
-            reply_markup=remove_keyboard,
+            reply_markup=shop_keyboard,
             parse_mode="HTML"
         )
