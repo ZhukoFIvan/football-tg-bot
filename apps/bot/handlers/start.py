@@ -82,7 +82,7 @@ async def cmd_start(message: Message, bot: Bot):
         await message.answer_photo(
             photo=photo,
             caption=welcome_text,
-            reply_markup=shop_keyboard,
+            reply_markup=shop_keyboard if shop_keyboard else None,
             parse_mode="HTML"
         )
     # Если локального файла нет, пробуем загрузить с сервера
@@ -93,20 +93,20 @@ async def cmd_start(message: Message, bot: Bot):
             await message.answer_photo(
                 photo=photo,
                 caption=welcome_text,
-                reply_markup=shop_keyboard,
+                reply_markup=shop_keyboard if shop_keyboard else None,
                 parse_mode="HTML"
             )
         except:
             # Если не получилось загрузить фото, отправляем просто текст
             await message.answer(
                 welcome_text,
-                reply_markup=shop_keyboard,
+                reply_markup=shop_keyboard if shop_keyboard else None,
                 parse_mode="HTML"
             )
     else:
         # Если фото нет, отправляем просто текст
         await message.answer(
             welcome_text,
-            reply_markup=shop_keyboard,
+            reply_markup=shop_keyboard if shop_keyboard else None,
             parse_mode="HTML"
         )

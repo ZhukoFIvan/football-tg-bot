@@ -101,44 +101,48 @@ async def handle_channel_post(message: Message, bot: Bot):
                 
                 logger.info(f"Найдена группа обсуждений: {linked_chat_id}")
                 logger.info(f"Текст комментария: {comment_text[:50]}...")
+                logger.info(f"ID поста в канале: {message.message_id}")
                 
-                # Небольшая задержка, чтобы Telegram успел создать тред в группе обсуждений
+                # Небольшая задержка, чтобы Telegram успел создать сообщение в группе обсуждений
                 await asyncio.sleep(1)
                 
                 # Отправляем комментарий к посту
-                # В группах обсуждений для комментариев к посту канала нужно использовать message_thread_id
-                # message_thread_id должен быть равен message_id поста в канале
+                # Для комментариев к посту канала нужно:
+                # 1. chat_id = ID группы обсуждений (linked_chat_id)
+                # 2. reply_to_message_id = message_id поста в канале
                 try:
-                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} с thread_id {message.message_id}")
+                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} с reply_to_message_id {message.message_id}")
                     
-                    # Пробуем использовать прямой вызов API через aiohttp для более точного контроля
+                    # Используем прямой вызов API через aiohttp
                     api_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
                     
                     payload = {
                         "chat_id": linked_chat_id,
                         "text": comment_text,
-                        "message_thread_id": message.message_id,
+                        "reply_to_message_id": message.message_id,  # ID поста в канале
                         "parse_mode": "HTML"
                     }
                     
                     async with aiohttp.ClientSession() as http_session:
                         async with http_session.post(api_url, json=payload) as response:
                             result = await response.json()
+                            logger.info(f"Ответ API: {result}")
                             if result.get("ok"):
-                                logger.info(f"✅ Комментарий успешно отправлен через прямой API: {result.get('result', {}).get('message_id')}")
+                                logger.info(f"✅ Комментарий успешно отправлен! Message ID: {result.get('result', {}).get('message_id')}")
                             else:
-                                logger.error(f"❌ Ошибка API: {result}")
-                                raise Exception(f"API error: {result.get('description')}")
+                                error_desc = result.get('description', 'Unknown error')
+                                logger.error(f"❌ Ошибка API: {error_desc}")
+                                raise Exception(f"API error: {error_desc}")
                                 
                 except Exception as e:
                     logger.error(f"Ошибка при отправке комментария через прямой API: {e}", exc_info=True)
                     # Fallback: пробуем через aiogram
                     try:
-                        logger.info("Пробую отправить комментарий через aiogram")
+                        logger.info("Пробую отправить комментарий через aiogram с reply_to_message_id")
                         await bot.send_message(
                             chat_id=linked_chat_id,
                             text=comment_text,
-                            message_thread_id=message.message_id,
+                            reply_to_message_id=message.message_id,  # ID поста в канале
                             parse_mode="HTML"
                         )
                         logger.info(f"✅ Комментарий успешно отправлен через aiogram")
