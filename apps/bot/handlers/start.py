@@ -2,12 +2,11 @@
 Обработчик команды /start
 """
 import logging
+import os
 from aiogram import Router, Bot
 from aiogram.filters import CommandStart
 from aiogram.types import Message, FSInputFile, URLInputFile
-import os
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.db.session import AsyncSessionLocal
@@ -20,12 +19,10 @@ logger = logging.getLogger(__name__)
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, bot: Bot):
-    """
-    Обработчик команды /start
-    """
+    """Обработчик команды /start"""
+    logger.info(f"🔵 /start от {message.from_user.id}")
+    
     try:
-        logger.info(f"Получена команда /start от пользователя {message.from_user.id} (@{message.from_user.username})")
-        
         # Регистрируем или обновляем пользователя в БД
         async with AsyncSessionLocal() as session:
             try:
@@ -35,8 +32,6 @@ async def cmd_start(message: Message, bot: Bot):
                 user = result.scalar_one_or_none()
                 
                 if not user:
-                    # Создаем нового пользователя
-                    logger.info(f"Создание нового пользователя: {message.from_user.id}")
                     user = User(
                         telegram_id=message.from_user.id,
                         username=message.from_user.username,
@@ -46,25 +41,20 @@ async def cmd_start(message: Message, bot: Bot):
                     )
                     session.add(user)
                     await session.commit()
-                    logger.info(f"✅ Пользователь {message.from_user.id} успешно создан")
+                    logger.info(f"✅ Пользователь {message.from_user.id} создан")
                 else:
-                    # Обновляем данные существующего пользователя
-                    logger.info(f"Обновление данных пользователя: {message.from_user.id}")
                     user.username = message.from_user.username
                     user.first_name = message.from_user.first_name or ""
                     user.last_name = message.from_user.last_name or ""
                     user.is_admin = message.from_user.id in settings.owner_ids
                     await session.commit()
-                    logger.info(f"✅ Данные пользователя {message.from_user.id} обновлены")
+                    logger.info(f"✅ Пользователь {message.from_user.id} обновлен")
             except Exception as e:
-                logger.error(f"❌ Ошибка при регистрации пользователя: {e}", exc_info=True)
+                logger.error(f"Ошибка БД: {e}", exc_info=True)
                 await session.rollback()
-                # Продолжаем выполнение, даже если не удалось сохранить в БД
         
-        # Определяем бренд и соответствующий текст/фото
-        brand_raw = getattr(settings, 'BRAND', 'noonyashop')
-        brand = str(brand_raw).lower().strip()
-        logger.info(f"Определен бренд: '{brand}' (из settings.BRAND='{brand_raw}')")
+        # Определяем бренд
+        brand = str(getattr(settings, 'BRAND', 'noonyashop')).lower().strip()
         
         if brand == "romixstore":
             welcome_text = """<b>Что умеет бот?</b>
@@ -74,7 +64,7 @@ async def cmd_start(message: Message, bot: Bot):
 Связь с поддержкой
 @romixstore_support"""
             photo_path = "uploads/welcomeRoma.JPG"
-        else:  # noonyashop (по умолчанию)
+        else:
             welcome_text = """<b>Что умеет бот?</b>
 
 💎 В магазине NOONYA SHOP ты сможешь задонатить быстро, а главное безопасно в FC MOBILE!
@@ -83,68 +73,46 @@ async def cmd_start(message: Message, bot: Bot):
 @noonyashop_support"""
             photo_path = "uploads/welcome.jpg"
         
-        # Добавляем inline-кнопку магазина (будет внизу сообщения)
         shop_keyboard = get_main_keyboard()
-        logger.debug(f"Клавиатура создана: {shop_keyboard is not None}")
         
-        # Сначала пробуем локальный файл
-        if os.path.exists(photo_path):
-            logger.info(f"Отправка фото из локального файла: {photo_path}")
-            try:
+        # Отправляем сообщение
+        try:
+            if os.path.exists(photo_path):
                 photo = FSInputFile(photo_path)
                 await message.answer_photo(
                     photo=photo,
                     caption=welcome_text,
-                    reply_markup=shop_keyboard if shop_keyboard else None,
+                    reply_markup=shop_keyboard,
                     parse_mode="HTML"
                 )
-                logger.info(f"✅ Приветственное сообщение отправлено пользователю {message.from_user.id}")
-            except Exception as e:
-                logger.error(f"❌ Ошибка при отправке фото из локального файла: {e}", exc_info=True)
-                # Пробуем отправить просто текст
-                await message.answer(
-                    welcome_text,
-                    reply_markup=shop_keyboard if shop_keyboard else None,
-                    parse_mode="HTML"
-                )
-        # Если локального файла нет, пробуем загрузить с сервера
-        elif settings.API_PUBLIC_URL:
-            try:
+            elif settings.API_PUBLIC_URL:
                 photo_url = f"{settings.API_PUBLIC_URL}/{photo_path}"
-                logger.info(f"Отправка фото с URL: {photo_url}")
                 photo = URLInputFile(photo_url)
                 await message.answer_photo(
                     photo=photo,
                     caption=welcome_text,
-                    reply_markup=shop_keyboard if shop_keyboard else None,
+                    reply_markup=shop_keyboard,
                     parse_mode="HTML"
                 )
-                logger.info(f"✅ Приветственное сообщение отправлено пользователю {message.from_user.id}")
-            except Exception as e:
-                logger.warning(f"⚠️ Не удалось загрузить фото с сервера: {e}")
-                # Если не получилось загрузить фото, отправляем просто текст
+            else:
                 await message.answer(
                     welcome_text,
-                    reply_markup=shop_keyboard if shop_keyboard else None,
+                    reply_markup=shop_keyboard,
                     parse_mode="HTML"
                 )
-                logger.info(f"✅ Приветственное сообщение (текст) отправлено пользователю {message.from_user.id}")
-        else:
-            # Если фото нет, отправляем просто текст
-            logger.info("Отправка приветственного сообщения без фото")
+            logger.info(f"✅ Сообщение отправлено {message.from_user.id}")
+        except Exception as e:
+            logger.error(f"Ошибка отправки: {e}", exc_info=True)
+            # Fallback - просто текст
             await message.answer(
                 welcome_text,
-                reply_markup=shop_keyboard if shop_keyboard else None,
+                reply_markup=shop_keyboard,
                 parse_mode="HTML"
             )
-            logger.info(f"✅ Приветственное сообщение отправлено пользователю {message.from_user.id}")
             
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка в обработчике /start: {e}", exc_info=True)
+        logger.error(f"КРИТИЧЕСКАЯ ОШИБКА /start: {e}", exc_info=True)
         try:
-            # Пытаемся отправить хотя бы простое сообщение об ошибке
-            await message.answer(
-                "❌ Произошла ошибка при запуске бота. Пожалуйста, попробуйте позже."
-            )
+            await message.answer("❌ Ошибка. Попробуйте позже.")
         except:
             pass
