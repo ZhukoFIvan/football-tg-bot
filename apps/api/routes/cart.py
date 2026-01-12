@@ -101,6 +101,13 @@ async def get_or_create_cart(user: User, db: AsyncSession) -> Cart:
         db.add(cart)
         await db.commit()
         await db.refresh(cart)
+        # Перезагружаем корзину с selectinload после создания
+        result = await db.execute(
+            select(Cart)
+            .where(Cart.id == cart.id)
+            .options(selectinload(Cart.items).selectinload(CartItem.product))
+        )
+        cart = result.scalar_one()
 
     return cart
 

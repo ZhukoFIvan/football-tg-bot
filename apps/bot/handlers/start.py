@@ -54,7 +54,9 @@ async def cmd_start(message: Message, bot: Bot):
             await session.rollback()
     
     # Определяем бренд и соответствующий текст/фото
-    brand = settings.BRAND.lower() if hasattr(settings, 'BRAND') else "noonyashop"
+    brand_raw = getattr(settings, 'BRAND', 'noonyashop')
+    brand = str(brand_raw).lower().strip()
+    logger.info(f"Определен бренд: '{brand}' (из settings.BRAND='{brand_raw}')")
     
     if brand == "romixstore":
         welcome_text = """<b>Что умеет бот?</b>
