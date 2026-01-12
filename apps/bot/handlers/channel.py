@@ -25,7 +25,17 @@ async def handle_channel_post(message: Message, bot: Bot):
     Отправляет комментарий в группу обсуждений канала
     """
     try:
-        logger.info(f"Получен пост в канале: {message.chat.id}, message_id: {message.message_id}")
+        # Проверяем, что это действительно пост в канале, а не сообщение в группе
+        if message.chat.type != "channel":
+            logger.debug(f"Пропускаем сообщение - это не канал: {message.chat.type}")
+            return
+        
+        # Проверяем, что это не forwarded сообщение и не reply
+        if message.forward_from_chat or message.reply_to_message:
+            logger.debug(f"Пропускаем сообщение - это forwarded или reply")
+            return
+        
+        logger.info(f"Получен пост в канале: {message.chat.id}, message_id: {message.message_id}, тип: {message.chat.type}")
         
         # Получаем настройки из БД
         async with AsyncSessionLocal() as session:
@@ -104,12 +114,12 @@ async def handle_channel_post(message: Message, bot: Bot):
                 logger.info(f"ID поста в канале: {message.message_id}")
                 
                 # Небольшая задержка, чтобы Telegram успел создать сообщение в группе обсуждений
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
                 
                 # Отправляем комментарий к посту
                 # Для комментариев к посту канала нужно:
                 # 1. chat_id = ID группы обсуждений (linked_chat_id)
-                # 2. reply_to_message_id = message_id поста в канале
+                # 2. reply_to_message_id = message_id поста в канале (это ID поста в канале, не в группе!)
                 try:
                     logger.info(f"Отправляю комментарий в группу {linked_chat_id} с reply_to_message_id {message.message_id}")
                     
@@ -132,7 +142,21 @@ async def handle_channel_post(message: Message, bot: Bot):
                             else:
                                 error_desc = result.get('description', 'Unknown error')
                                 logger.error(f"❌ Ошибка API: {error_desc}")
-                                raise Exception(f"API error: {error_desc}")
+                                
+                                # Если ошибка "message to reply not found", пробуем найти сообщение в группе
+                                if "message to reply not found" in error_desc.lower() or "reply message not found" in error_desc.lower():
+                                    logger.warning("Сообщение для ответа не найдено, возможно нужно больше времени")
+                                    # Увеличиваем задержку и пробуем еще раз
+                                    await asyncio.sleep(2)
+                                    async with http_session.post(api_url, json=payload) as retry_response:
+                                        retry_result = await retry_response.json()
+                                        logger.info(f"Ответ API после повтора: {retry_result}")
+                                        if retry_result.get("ok"):
+                                            logger.info(f"✅ Комментарий успешно отправлен после повтора!")
+                                        else:
+                                            raise Exception(f"API error after retry: {retry_result.get('description')}")
+                                else:
+                                    raise Exception(f"API error: {error_desc}")
                                 
                 except Exception as e:
                     logger.error(f"Ошибка при отправке комментария через прямой API: {e}", exc_info=True)
