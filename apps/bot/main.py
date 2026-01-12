@@ -25,6 +25,18 @@ async def main():
     # Инициализация бота
     bot = Bot(token=settings.BOT_TOKEN, parse_mode=ParseMode.HTML)
 
+    # Получаем информацию о боте и сохраняем username в настройки
+    try:
+        bot_info = await bot.get_me()
+        if bot_info.username:
+            settings.BOT_USERNAME = bot_info.username
+            logger.info(f"✅ Bot username: @{bot_info.username}")
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось получить username бота: {e}")
+        # Используем значение из env или дефолтное
+        if not hasattr(settings, 'BOT_USERNAME') or not settings.BOT_USERNAME:
+            settings.BOT_USERNAME = "noonyashop_bot"
+
     # Инициализация диспетчера с FSM storage
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)

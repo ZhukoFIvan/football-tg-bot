@@ -111,9 +111,11 @@ class PaypalychProvider(PaymentProvider):
                 # ВАЖНО: result_url - URL для postback уведомлений от Paypalych
                 from core.config import settings
                 result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/paypalych"
+                # Получаем username бота из настроек
+                bot_username = settings.BOT_USERNAME if hasattr(settings, 'BOT_USERNAME') and settings.BOT_USERNAME else "noonyashop_bot"
                 # Frontend страницы результатов (не API, а Next.js)
-                success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}"
-                fail_url = f"{settings.FRONTEND_URL}/payments/failed?order_id={order_id}"
+                success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}&bot_username={bot_username}"
+                fail_url = f"{settings.FRONTEND_URL}/payments/failed?order_id={order_id}&bot_username={bot_username}"
                 
                 data_form = aiohttp.FormData()
                 data_form.add_field("amount", str(float(amount)))

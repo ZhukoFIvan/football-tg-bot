@@ -335,6 +335,10 @@ async def freekassa_webhook(
             # Отправить уведомление пользователю
             user = payment.user
             if user:
+                # Определяем бренд для текста поддержки
+                brand = settings.BRAND.lower() if hasattr(settings, 'BRAND') else "noonyashop"
+                support_text = "@romixstore_support / @noonyashop_support" if brand == "romixstore" else "@romixstore_support / @noonyashop_support"
+                
                 message = f"""
 ✅ <b>Платеж успешно выполнен!</b>
 
@@ -343,6 +347,8 @@ async def freekassa_webhook(
 💳 Провайдер: FreeKassa
 
 Ваш заказ оплачен и будет обработан в ближайшее время.
+
+Если возникли вопросы обращайтесь {support_text}
 """
                 await send_telegram_notification(user.telegram_id, message)
 
@@ -497,6 +503,10 @@ async def paypalych_webhook(
             # Отправить уведомление пользователю
             user = payment.user
             if user:
+                # Определяем бренд для текста поддержки
+                brand = settings.BRAND.lower() if hasattr(settings, 'BRAND') else "noonyashop"
+                support_text = "@romixstore_support / @noonyashop_support" if brand == "romixstore" else "@romixstore_support / @noonyashop_support"
+                
                 message = f"""
 ✅ <b>Платеж успешно выполнен!</b>
 
@@ -505,6 +515,8 @@ async def paypalych_webhook(
 💳 Провайдер: PayPaly
 
 Ваш заказ оплачен и будет обработан в ближайшее время.
+
+Если возникли вопросы обращайтесь {support_text}
 """
                 await send_telegram_notification(user.telegram_id, message)
         elif status.upper() == "FAIL":

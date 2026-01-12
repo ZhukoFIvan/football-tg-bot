@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # Payment Providers - PayPaly
     PAYPALYCH_API_KEY: str = ""  # API ключ Paypalych (формат: merchant_id|api_key)
     PAYPALYCH_SHOP_ID: str = ""  # Shop ID из личного кабинета Paypalych (например: "G1vrEyX0LR")
+    
+    # Brand settings
+    BRAND: str = "noonyashop"  # "noonyashop" или "romixstore"
+    BOT_USERNAME: str = ""  # Username бота (например: "noonyashop_bot" или "romixstore_bot")
 
     model_config = SettingsConfigDict(
         env_file=".env",

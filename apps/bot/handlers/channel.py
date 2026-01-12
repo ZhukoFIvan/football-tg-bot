@@ -2,13 +2,15 @@
 Обработчик автоматических комментариев в группе обсуждений канала
 """
 import logging
-import asyncio
+import re
+import json
 from aiogram import Router, Bot
 from aiogram.types import Message
 from sqlalchemy import select
 
 from core.db.session import AsyncSessionLocal
 from core.db.models import SiteSettings
+from core.config import settings
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -57,17 +59,11 @@ async def handle_channel_post(message: Message, bot: Bot):
             try:
                 logger.info(f"Получаем информацию о канале {message.chat.id}")
                 
-                # В aiogram 3.x для получения linked_chat нужно использовать get_chat с правильными параметрами
-                # Но linked_chat может быть недоступен в объекте Chat
-                # Используем альтернативный способ - пытаемся найти группу обсуждений через forward_from_chat
-                # или используем get_chat_member для проверки прав бота в группе
-                
                 linked_chat_id = None
                 
                 # Пробуем получить linked_chat_id через get_chat
                 try:
                     chat = await bot.get_chat(message.chat.id)
-                    logger.info(f"Информация о канале получена: {chat}")
                     
                     # В aiogram 3.x linked_chat может быть в разных местах
                     if hasattr(chat, 'linked_chat') and chat.linked_chat:
@@ -77,7 +73,23 @@ async def handle_channel_post(message: Message, bot: Bot):
                         linked_chat_id = chat.linked_chat_id
                         logger.info(f"Найден linked_chat_id через chat.linked_chat_id: {linked_chat_id}")
                 except Exception as chat_error:
-                    logger.error(f"Ошибка при получении информации о канале: {chat_error}")
+                    # Если не получилось распарсить Chat из-за новых полей, используем прямой HTTP запрос к API
+                    logger.warning(f"Ошибка при получении информации о канале через get_chat: {chat_error}")
+                    
+                    # Используем прямой HTTP запрос к Telegram API для получения linked_chat_id
+                    try:
+                        import aiohttp
+                        api_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/getChat"
+                        async with aiohttp.ClientSession() as http_session:
+                            async with http_session.post(api_url, json={"chat_id": message.chat.id}) as response:
+                                data = await response.json()
+                                if data.get("ok") and "result" in data:
+                                    result = data["result"]
+                                    if "linked_chat_id" in result:
+                                        linked_chat_id = result["linked_chat_id"]
+                                        logger.info(f"Найден linked_chat_id через прямой API запрос: {linked_chat_id}")
+                    except Exception as api_error:
+                        logger.error(f"Ошибка при получении linked_chat_id через прямой API: {api_error}")
                 
                 # Если linked_chat_id не найден, возможно канал не имеет связанной группы
                 if not linked_chat_id:

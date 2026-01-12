@@ -98,7 +98,15 @@ async def process_broadcast_text(message: Message, state: FSMContext):
         )
         return
 
-    await state.update_data(broadcast_text=text)
+    # Сохраняем текст и фото (если есть)
+    photo_file_id = None
+    if message.photo:
+        photo_file_id = message.photo[-1].file_id  # Берем самое большое фото
+    
+    await state.update_data(
+        broadcast_text=text,
+        broadcast_photo=photo_file_id
+    )
     await message.answer(
         "✅ Текст рассылки сохранен.\n\n"
         "Теперь отправьте название кнопки, которая будет внизу сообщения.\n"
@@ -127,14 +135,17 @@ async def process_broadcast_button_text(message: Message, state: FSMContext, bot
 
     data = await state.get_data()
     broadcast_text = data.get("broadcast_text", "")
+    broadcast_photo = data.get("broadcast_photo")
 
     # Создаем клавиатуру с WebApp кнопкой
+    from core.config import settings
+    web_app_url = settings.FRONTEND_URL if settings.FRONTEND_URL else "https://noonyashop.ru"
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text=button_text,
-                    web_app=WebAppInfo(url="https://romixstore.ru")
+                    web_app=WebAppInfo(url=web_app_url)
                 )
             ]
         ]
@@ -168,12 +179,22 @@ async def process_broadcast_button_text(message: Message, state: FSMContext, bot
 
             for user in users:
                 try:
-                    await bot.send_message(
-                        chat_id=user.telegram_id,
-                        text=broadcast_text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
+                    # Если есть фото, отправляем с фото
+                    if broadcast_photo:
+                        await bot.send_photo(
+                            chat_id=user.telegram_id,
+                            photo=broadcast_photo,
+                            caption=broadcast_text,
+                            reply_markup=keyboard,
+                            parse_mode="HTML"
+                        )
+                    else:
+                        await bot.send_message(
+                            chat_id=user.telegram_id,
+                            text=broadcast_text,
+                            reply_markup=keyboard,
+                            parse_mode="HTML"
+                        )
                     sent_count += 1
                     # Небольшая задержка, чтобы не превысить лимиты Telegram API
                     await asyncio.sleep(0.05)  # 50ms между сообщениями
