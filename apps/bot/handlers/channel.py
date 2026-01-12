@@ -112,72 +112,50 @@ async def handle_channel_post(message: Message, bot: Bot):
                 logger.info(f"Текст комментария: {comment_text[:50]}...")
                 logger.info(f"ID поста в канале: {message.message_id}")
                 
-                # Небольшая задержка, чтобы Telegram успел создать сообщение в группе обсуждений
-                await asyncio.sleep(3)
+                # Небольшая задержка, чтобы Telegram успел создать тред в группе обсуждений
+                await asyncio.sleep(2)
                 
-                # Для комментариев к посту в канале нужно использовать формат:
-                # chat_id = f"{linked_chat_id}_{message.message_id}"
-                # Это специальный формат для комментариев к постам в каналах
+                # Для комментариев к посту в канале нужно использовать message_thread_id
+                # message_thread_id должен быть равен message_id поста в канале
                 try:
-                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} для поста {message.message_id}")
+                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} с message_thread_id={message.message_id}")
                     
                     send_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
                     
-                    # Пробуем использовать специальный формат chat_id для комментариев к постам
-                    # Формат: chat_id = f"{group_id}_{channel_message_id}"
-                    special_chat_id = f"{linked_chat_id}_{message.message_id}"
-                    
+                    # Используем message_thread_id для создания комментария в треде поста
                     payload = {
-                        "chat_id": special_chat_id,
+                        "chat_id": linked_chat_id,
                         "text": comment_text,
+                        "message_thread_id": message.message_id,  # ID поста в канале как thread_id
                         "parse_mode": "HTML"
                     }
                     
                     async with aiohttp.ClientSession() as http_session:
                         async with http_session.post(send_url, json=payload) as response:
                             result = await response.json()
-                            logger.info(f"Ответ API с специальным chat_id: {result}")
+                            logger.info(f"Ответ API с message_thread_id: {result}")
                             if result.get("ok"):
                                 logger.info(f"✅ Комментарий успешно отправлен! Message ID: {result.get('result', {}).get('message_id')}")
                             else:
                                 error_desc = result.get('description', 'Unknown error')
-                                logger.warning(f"⚠️ Ошибка с специальным chat_id: {error_desc}")
+                                logger.warning(f"⚠️ Ошибка с message_thread_id: {error_desc}")
                                 
-                                # Если не получилось, пробуем обычный способ с reply_to_message_id
-                                logger.info("Пробую обычный способ с reply_to_message_id")
-                                
-                                payload_reply = {
-                                    "chat_id": linked_chat_id,
-                                    "text": comment_text,
-                                    "reply_to_message_id": message.message_id,
-                                    "parse_mode": "HTML"
-                                }
-                                
-                                await asyncio.sleep(1)
-                                async with http_session.post(send_url, json=payload_reply) as reply_response:
-                                    reply_result = await reply_response.json()
-                                    logger.info(f"Ответ API с reply_to_message_id: {reply_result}")
-                                    if reply_result.get("ok"):
-                                        logger.info(f"✅ Комментарий успешно отправлен с reply_to_message_id!")
-                                    else:
-                                        error_desc2 = reply_result.get('description', 'Unknown error')
-                                        logger.error(f"❌ Ошибка с reply_to_message_id: {error_desc2}")
-                                        raise Exception(f"Не удалось отправить комментарий: {error_desc2}")
+                                # Если не получилось, пробуем через aiogram
+                                logger.info("Пробую через aiogram с message_thread_id")
+                                try:
+                                    await bot.send_message(
+                                        chat_id=linked_chat_id,
+                                        text=comment_text,
+                                        message_thread_id=message.message_id,
+                                        parse_mode="HTML"
+                                    )
+                                    logger.info(f"✅ Комментарий успешно отправлен через aiogram с message_thread_id")
+                                except Exception as aiogram_error:
+                                    logger.error(f"❌ Ошибка через aiogram: {aiogram_error}")
+                                    raise Exception(f"Не удалось отправить комментарий: {error_desc}")
                                 
                 except Exception as e:
-                    logger.error(f"Ошибка при отправке комментария через прямой API: {e}", exc_info=True)
-                    # Fallback: пробуем через aiogram
-                    try:
-                        logger.info("Пробую отправить комментарий через aiogram")
-                        await bot.send_message(
-                            chat_id=linked_chat_id,
-                            text=comment_text,
-                            reply_to_message_id=message.message_id,
-                            parse_mode="HTML"
-                        )
-                        logger.info(f"✅ Комментарий успешно отправлен через aiogram")
-                    except Exception as e2:
-                        logger.error(f"Ошибка при отправке комментария через aiogram: {e2}", exc_info=True)
+                    logger.error(f"Ошибка при отправке комментария: {e}", exc_info=True)
                     
             except Exception as e:
                 logger.error(f"Ошибка при получении информации о канале: {e}", exc_info=True)
