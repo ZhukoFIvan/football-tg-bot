@@ -44,14 +44,26 @@ async def migrate_from_sqlite(
     sqlite_path = Path(sqlite_db_path)
     
     # Если путь относительный, пробуем найти файл в разных местах
-    if not sqlite_path.is_absolute() and not sqlite_path.exists():
-        # Пробуем найти в корне проекта
+    if not sqlite_path.is_absolute():
+        # В Docker контейнере проект монтируется в /app
+        # Пробуем найти в корне проекта (относительно /app в Docker или корня проекта локально)
         root_dir = Path(__file__).parent.parent
+        
+        # Если мы в Docker (/app), используем /app, иначе корень проекта
+        if Path('/app').exists() and Path('/app').is_dir():
+            # Мы в Docker контейнере
+            search_root = Path('/app')
+        else:
+            # Локально
+            search_root = root_dir
+        
         possible_paths = [
-            root_dir / sqlite_db_path,
-            root_dir / "apps" / sqlite_db_path,
-            root_dir / "apps" / "bot" / sqlite_db_path,
-            root_dir / "apps" / "api" / sqlite_db_path,
+            search_root / sqlite_db_path,
+            search_root / "apps" / sqlite_db_path,
+            search_root / "apps" / "bot" / sqlite_db_path,
+            search_root / "apps" / "api" / sqlite_db_path,
+            root_dir / sqlite_db_path,  # Fallback
+            root_dir / "apps" / sqlite_db_path,  # Fallback
         ]
         
         for possible_path in possible_paths:
@@ -63,14 +75,16 @@ async def migrate_from_sqlite(
             logger.error(f"❌ Файл SQLite БД не найден: {sqlite_db_path}")
             logger.error(f"   Проверены пути:")
             for pp in possible_paths:
-                logger.error(f"     - {pp}")
+                exists = "✅" if pp.exists() else "❌"
+                logger.error(f"     {exists} {pp}")
+            logger.error(f"   Текущая рабочая директория: {Path.cwd()}")
             raise FileNotFoundError(f"SQLite database file not found: {sqlite_db_path}")
     
     if not sqlite_path.exists():
         logger.error(f"❌ Файл SQLite БД не найден: {sqlite_path}")
         raise FileNotFoundError(f"SQLite database file not found: {sqlite_path}")
     
-    logger.info(f"📁 SQLite БД: {sqlite_db_path}")
+    logger.info(f"📁 SQLite БД: {sqlite_path}")
     logger.info(f"🔗 PostgreSQL БД: {new_db_url.split('@')[1] if '@' in new_db_url else new_db_url}")
     
     if dry_run:
@@ -79,7 +93,7 @@ async def migrate_from_sqlite(
     # Подключаемся к SQLite БД
     logger.info("🔌 Подключение к SQLite БД...")
     try:
-        sqlite_conn = sqlite3.connect(sqlite_db_path)
+        sqlite_conn = sqlite3.connect(str(sqlite_path))
         sqlite_conn.row_factory = sqlite3.Row  # Для доступа к колонкам по имени
     except Exception as e:
         logger.error(f"❌ Ошибка при подключении к SQLite БД: {e}")

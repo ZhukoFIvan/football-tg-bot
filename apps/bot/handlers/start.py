@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 @router.message(CommandStart())
 async def cmd_start(message: Message, bot: Bot):
     """Обработчик команды /start"""
-    logger.info(f"🔵 /start от {message.from_user.id}")
+    user_id = message.from_user.id
+    username = message.from_user.username or "N/A"
+    logger.info(f"🔵 /start от {user_id} (@{username})")
     
     try:
         # Регистрируем или обновляем пользователя в БД
@@ -74,9 +76,11 @@ async def cmd_start(message: Message, bot: Bot):
             photo_path = "uploads/welcome.jpg"
         
         shop_keyboard = get_main_keyboard()
+        logger.info(f"📱 Клавиатура создана: {shop_keyboard is not None}")
         
         # Отправляем сообщение
         try:
+            logger.info(f"📤 Отправка сообщения пользователю {user_id}...")
             if os.path.exists(photo_path):
                 photo = FSInputFile(photo_path)
                 await message.answer_photo(
@@ -111,8 +115,9 @@ async def cmd_start(message: Message, bot: Bot):
             )
             
     except Exception as e:
-        logger.error(f"КРИТИЧЕСКАЯ ОШИБКА /start: {e}", exc_info=True)
+        logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА /start для {user_id}: {e}", exc_info=True)
         try:
             await message.answer("❌ Ошибка. Попробуйте позже.")
-        except:
-            pass
+            logger.info(f"✅ Отправлено сообщение об ошибке пользователю {user_id}")
+        except Exception as fallback_error:
+            logger.error(f"❌ Не удалось отправить сообщение об ошибке: {fallback_error}")

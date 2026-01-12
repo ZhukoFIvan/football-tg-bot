@@ -8,11 +8,22 @@ from pathlib import Path
 # Путь к файлу БД - пробуем найти в разных местах
 root_dir = Path(__file__).parent
 db_name = 'shop.db'
+
+# Если мы в Docker (/app), используем /app, иначе корень проекта
+if Path('/app').exists() and Path('/app').is_dir():
+    # Мы в Docker контейнере
+    search_root = Path('/app')
+else:
+    # Локально
+    search_root = root_dir
+
 possible_paths = [
-    root_dir / db_name,
-    root_dir / "apps" / db_name,
-    root_dir / "apps" / "bot" / db_name,
-    root_dir / "apps" / "api" / db_name,
+    search_root / db_name,
+    search_root / "apps" / db_name,
+    search_root / "apps" / "bot" / db_name,
+    search_root / "apps" / "api" / db_name,
+    root_dir / db_name,  # Fallback
+    root_dir / "apps" / db_name,  # Fallback
 ]
 
 db_path = None
@@ -25,8 +36,10 @@ if not db_path:
     print(f"❌ Файл БД не найден: {db_name}")
     print(f"   Проверены пути:")
     for pp in possible_paths:
-        print(f"     - {pp}")
+        exists = "✅" if pp.exists() else "❌"
+        print(f"     {exists} {pp}")
     print(f"   Текущая директория: {Path.cwd()}")
+    print(f"   Корень поиска: {search_root}")
     sys.exit(1)
 
 print(f"📁 Проверка БД: {db_path}")
