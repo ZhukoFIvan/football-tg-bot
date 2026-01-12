@@ -42,9 +42,33 @@ async def migrate_from_sqlite(
     
     # Проверяем существование SQLite файла
     sqlite_path = Path(sqlite_db_path)
+    
+    # Если путь относительный, пробуем найти файл в разных местах
+    if not sqlite_path.is_absolute() and not sqlite_path.exists():
+        # Пробуем найти в корне проекта
+        root_dir = Path(__file__).parent.parent
+        possible_paths = [
+            root_dir / sqlite_db_path,
+            root_dir / "apps" / sqlite_db_path,
+            root_dir / "apps" / "bot" / sqlite_db_path,
+            root_dir / "apps" / "api" / sqlite_db_path,
+        ]
+        
+        for possible_path in possible_paths:
+            if possible_path.exists():
+                sqlite_path = possible_path
+                logger.info(f"📁 Найден файл БД: {sqlite_path}")
+                break
+        else:
+            logger.error(f"❌ Файл SQLite БД не найден: {sqlite_db_path}")
+            logger.error(f"   Проверены пути:")
+            for pp in possible_paths:
+                logger.error(f"     - {pp}")
+            raise FileNotFoundError(f"SQLite database file not found: {sqlite_db_path}")
+    
     if not sqlite_path.exists():
-        logger.error(f"❌ Файл SQLite БД не найден: {sqlite_db_path}")
-        raise FileNotFoundError(f"SQLite database file not found: {sqlite_db_path}")
+        logger.error(f"❌ Файл SQLite БД не найден: {sqlite_path}")
+        raise FileNotFoundError(f"SQLite database file not found: {sqlite_path}")
     
     logger.info(f"📁 SQLite БД: {sqlite_db_path}")
     logger.info(f"🔗 PostgreSQL БД: {new_db_url.split('@')[1] if '@' in new_db_url else new_db_url}")

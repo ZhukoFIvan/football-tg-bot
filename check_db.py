@@ -5,11 +5,27 @@ import sqlite3
 import sys
 from pathlib import Path
 
-# Путь к файлу БД
-db_path = Path(__file__).parent / 'shop.db'
+# Путь к файлу БД - пробуем найти в разных местах
+root_dir = Path(__file__).parent
+db_name = 'shop.db'
+possible_paths = [
+    root_dir / db_name,
+    root_dir / "apps" / db_name,
+    root_dir / "apps" / "bot" / db_name,
+    root_dir / "apps" / "api" / db_name,
+]
 
-if not db_path.exists():
-    print(f"❌ Файл БД не найден: {db_path}")
+db_path = None
+for path in possible_paths:
+    if path.exists():
+        db_path = path
+        break
+
+if not db_path:
+    print(f"❌ Файл БД не найден: {db_name}")
+    print(f"   Проверены пути:")
+    for pp in possible_paths:
+        print(f"     - {pp}")
     print(f"   Текущая директория: {Path.cwd()}")
     sys.exit(1)
 
