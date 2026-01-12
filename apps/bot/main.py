@@ -42,9 +42,13 @@ async def main():
     dp = Dispatcher(storage=storage)
 
     # Регистрация роутеров
+    logger.info("📝 Регистрация роутеров...")
     dp.include_router(start.router)
+    logger.info("✅ Роутер start зарегистрирован")
     dp.include_router(admin.router)
+    logger.info("✅ Роутер admin зарегистрирован")
     dp.include_router(channel.router)
+    logger.info("✅ Роутер channel зарегистрирован")
 
     logger.info("🤖 Bot starting...")
     logger.info(f"👤 Owner IDs: {settings.owner_ids}")
