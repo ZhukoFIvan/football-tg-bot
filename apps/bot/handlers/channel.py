@@ -5,6 +5,7 @@ import logging
 import re
 import json
 import asyncio
+import time
 import aiohttp
 from aiogram import Router, Bot
 from aiogram.types import Message
@@ -43,17 +44,16 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
         
         # Увеличиваем задержку, чтобы Telegram успел создать сообщение в группе обсуждений
         # и обработать пост в канале
+        # Разбиваем задержку на части, чтобы проверять актуальность
         logger.info("Ожидание 3 секунд перед отправкой комментария...")
-        await asyncio.sleep(3)
-        
-        # Проверяем, не устарел ли этот пост (не появился ли новый)
-        # message_id в Telegram всегда увеличивается, поэтому если текущий меньше последнего - пост устарел
-        async with _post_lock:
-            if channel_id in _last_post_ids:
-                last_message_id = _last_post_ids[channel_id]
-                if current_message_id < last_message_id:
-                    logger.info(f"Пост {current_message_id} устарел, появился новый пост {last_message_id}. Пропускаем.")
-                    return
+        for _ in range(6):  # 6 раз по 0.5 секунды = 3 секунды
+            await asyncio.sleep(0.5)
+            async with _post_lock:
+                if channel_id in _last_post_ids:
+                    last_message_id = _last_post_ids[channel_id]
+                    if current_message_id < last_message_id:
+                        logger.info(f"Пост {current_message_id} устарел во время ожидания, появился новый пост {last_message_id}. Пропускаем.")
+                        return
         
         # Проверяем еще раз перед отправкой (на случай, если за время задержки пришел новый пост)
         async with _post_lock:
@@ -86,14 +86,22 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
             # Если ошибка, пробуем еще раз через 2 секунды (возможно, сообщение еще не создано в группе)
             if "message to reply not found" in error_msg.lower() or "bad request" in error_msg.lower():
                 logger.info("Пробую еще раз через 2 секунды...")
-                await asyncio.sleep(2)
+                # Разбиваем задержку на части для проверки актуальности
+                for _ in range(4):  # 4 раза по 0.5 секунды = 2 секунды
+                    await asyncio.sleep(0.5)
+                    async with _post_lock:
+                        if channel_id in _last_post_ids:
+                            last_message_id = _last_post_ids[channel_id]
+                            if current_message_id < last_message_id:
+                                logger.info(f"Пост {current_message_id} устарел во время повтора, появился новый пост {last_message_id}. Пропускаем.")
+                                return
                 
-                # Проверяем еще раз, не устарел ли пост
+                # Проверяем еще раз перед отправкой
                 async with _post_lock:
                     if channel_id in _last_post_ids:
                         last_message_id = _last_post_ids[channel_id]
                         if current_message_id < last_message_id:
-                            logger.info(f"Пост {current_message_id} устарел во время повтора. Пропускаем.")
+                            logger.info(f"Пост {current_message_id} устарел перед повторной отправкой. Пропускаем.")
                             return
                 
                 try:
@@ -174,17 +182,23 @@ async def handle_channel_post(message: Message, bot: Bot):
         channel_id = message.chat.id
         current_message_id = message.message_id
         
+        # Проверяем, что пост свежий (не старше 30 секунд)
+        # Это нужно, чтобы не обрабатывать старые посты, которые приходят с задержкой из-за polling
+        current_time = time.time()
+        if message.date:
+            post_age = current_time - message.date.timestamp()
+            if post_age > 30:
+                logger.info(f"Пропускаем старый пост {current_message_id}, возраст: {post_age:.1f} секунд")
+                return
+        
         # Отменяем предыдущую задачу для этого канала, если она существует
+        old_task = None
         async with _post_lock:
             if channel_id in _active_tasks:
                 old_task = _active_tasks[channel_id]
                 if not old_task.done() and not old_task.cancelled():
                     logger.info(f"Отменяю обработку предыдущего поста, так как получен новый пост {current_message_id}")
                     old_task.cancel()
-                    try:
-                        await old_task
-                    except asyncio.CancelledError:
-                        logger.debug(f"Предыдущая задача успешно отменена")
                 del _active_tasks[channel_id]
             
             # Обновляем последний message_id для этого канала
@@ -193,6 +207,15 @@ async def handle_channel_post(message: Message, bot: Bot):
                 if old_message_id != current_message_id:
                     logger.info(f"Получен новый пост {current_message_id}, предыдущий был {old_message_id}. Обновляю.")
             _last_post_ids[channel_id] = current_message_id
+        
+        # Ждем отмены предыдущей задачи вне lock, чтобы не блокировать
+        if old_task and not old_task.done():
+            try:
+                await asyncio.wait_for(old_task, timeout=0.1)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                logger.debug(f"Предыдущая задача отменена или таймаут")
+            except Exception as e:
+                logger.debug(f"Ошибка при ожидании отмены задачи: {e}")
         
         # Получаем настройки из БД
         async with AsyncSessionLocal() as session:
