@@ -21,7 +21,11 @@ logger = logging.getLogger(__name__)
 # Ключ: channel_id, Значение: last_message_id
 _last_post_ids: dict[int, int] = {}
 
-# Lock для синхронизации доступа к словарю
+# Словарь для хранения активных задач обработки постов
+# Ключ: channel_id, Значение: task
+_active_tasks: dict[int, asyncio.Task] = {}
+
+# Lock для синхронизации доступа к словарям
 _post_lock = asyncio.Lock()
 
 
@@ -43,10 +47,11 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
         await asyncio.sleep(3)
         
         # Проверяем, не устарел ли этот пост (не появился ли новый)
+        # message_id в Telegram всегда увеличивается, поэтому если текущий меньше последнего - пост устарел
         async with _post_lock:
             if channel_id in _last_post_ids:
                 last_message_id = _last_post_ids[channel_id]
-                if last_message_id != current_message_id:
+                if current_message_id < last_message_id:
                     logger.info(f"Пост {current_message_id} устарел, появился новый пост {last_message_id}. Пропускаем.")
                     return
         
@@ -54,7 +59,7 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
         async with _post_lock:
             if channel_id in _last_post_ids:
                 last_message_id = _last_post_ids[channel_id]
-                if last_message_id != current_message_id:
+                if current_message_id < last_message_id:
                     logger.info(f"Пост {current_message_id} устарел перед отправкой, появился новый пост {last_message_id}. Пропускаем.")
                     return
         
@@ -87,7 +92,7 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
                 async with _post_lock:
                     if channel_id in _last_post_ids:
                         last_message_id = _last_post_ids[channel_id]
-                        if last_message_id != current_message_id:
+                        if current_message_id < last_message_id:
                             logger.info(f"Пост {current_message_id} устарел во время повтора. Пропускаем.")
                             return
                 
@@ -133,6 +138,17 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
         raise
     except Exception as e:
         logger.error(f"Ошибка при обработке поста {current_message_id}: {e}", exc_info=True)
+    finally:
+        # Удаляем задачу из словаря после завершения, только если message_id все еще актуален
+        async with _post_lock:
+            if channel_id in _active_tasks and channel_id in _last_post_ids:
+                # Удаляем задачу только если текущий message_id все еще последний
+                # Это означает, что задача не была заменена новой
+                if _last_post_ids[channel_id] == current_message_id:
+                    stored_task = _active_tasks.get(channel_id)
+                    if stored_task and (stored_task.done() or stored_task.cancelled()):
+                        del _active_tasks[channel_id]
+                        logger.debug(f"Задача для поста {current_message_id} удалена из словаря")
 
 
 @router.channel_post()
@@ -158,8 +174,20 @@ async def handle_channel_post(message: Message, bot: Bot):
         channel_id = message.chat.id
         current_message_id = message.message_id
         
-        # Обновляем последний message_id для этого канала
+        # Отменяем предыдущую задачу для этого канала, если она существует
         async with _post_lock:
+            if channel_id in _active_tasks:
+                old_task = _active_tasks[channel_id]
+                if not old_task.done() and not old_task.cancelled():
+                    logger.info(f"Отменяю обработку предыдущего поста, так как получен новый пост {current_message_id}")
+                    old_task.cancel()
+                    try:
+                        await old_task
+                    except asyncio.CancelledError:
+                        logger.debug(f"Предыдущая задача успешно отменена")
+                del _active_tasks[channel_id]
+            
+            # Обновляем последний message_id для этого канала
             if channel_id in _last_post_ids:
                 old_message_id = _last_post_ids[channel_id]
                 if old_message_id != current_message_id:
@@ -242,6 +270,9 @@ async def handle_channel_post(message: Message, bot: Bot):
                 task = asyncio.create_task(
                     _process_post_comment(message, bot, comment_text, linked_chat_id)
                 )
+                # Сохраняем задачу в словаре
+                async with _post_lock:
+                    _active_tasks[channel_id] = task
                 logger.info(f"Создана задача для обработки поста {current_message_id}")
                     
             except Exception as e:
