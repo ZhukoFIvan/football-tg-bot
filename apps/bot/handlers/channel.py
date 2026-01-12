@@ -117,22 +117,19 @@ async def handle_channel_post(message: Message, bot: Bot):
                 logger.info("Ожидание 5 секунд перед отправкой комментария...")
                 await asyncio.sleep(5)
                 
-                # Для комментариев к посту в канале нужно использовать специальный формат chat_id
-                # Формат: chat_id = "{group_id}_{channel_message_id}" (СТРОКА!)
-                # Это единственный способ отправить комментарий, который будет отображаться под постом в канале
+                # Для комментариев к посту в канале нужно использовать message_thread_id
+                # message_thread_id должен быть равен message_id поста в канале
+                # Это создаст комментарий в треде, связанном с постом
                 try:
                     send_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
                     
-                    # Формируем chat_id для комментария к посту в канале
-                    # Важно: это должна быть СТРОКА вида "-1001234567890_123"
-                    comment_chat_id = f"{linked_chat_id}_{message.message_id}"
-                    logger.info(f"Отправляю комментарий к посту {message.message_id} с chat_id='{comment_chat_id}' (строка)")
+                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} с message_thread_id={message.message_id}")
                     
-                    # Пробуем отправить через прямой API запрос
-                    # Используем JSON, но chat_id как строка
+                    # Используем message_thread_id для создания комментария в треде поста
                     payload = {
-                        "chat_id": comment_chat_id,  # Строка формата "{group_id}_{message_id}"
+                        "chat_id": linked_chat_id,  # ID группы обсуждений
                         "text": comment_text,
+                        "message_thread_id": message.message_id,  # ID поста в канале как thread_id
                         "parse_mode": "HTML"
                     }
                     
@@ -144,10 +141,10 @@ async def handle_channel_post(message: Message, bot: Bot):
                                 logger.info(f"✅ Комментарий успешно отправлен к посту в канале! Message ID: {result.get('result', {}).get('message_id')}")
                             else:
                                 error_desc = result.get('description', 'Unknown error')
-                                logger.warning(f"⚠️ Ошибка с форматом chat_id: {error_desc}")
+                                logger.warning(f"⚠️ Ошибка с message_thread_id: {error_desc}")
                                 
                                 # Если ошибка, пробуем еще раз через 2 секунды
-                                if "chat not found" in error_desc.lower() or "bad request" in error_desc.lower():
+                                if "message thread not found" in error_desc.lower() or "bad request" in error_desc.lower():
                                     logger.info("Пробую еще раз через 2 секунды...")
                                     await asyncio.sleep(2)
                                     async with http_session.post(send_url, json=payload) as retry_response:
@@ -158,7 +155,20 @@ async def handle_channel_post(message: Message, bot: Bot):
                                         else:
                                             retry_error = retry_result.get('description', 'Unknown error')
                                             logger.error(f"❌ Ошибка после повтора: {retry_error}")
-                                            raise Exception(f"Не удалось отправить комментарий к посту: {retry_error}")
+                                            
+                                            # Пробуем через aiogram с message_thread_id
+                                            logger.info("Пробую через aiogram с message_thread_id")
+                                            try:
+                                                await bot.send_message(
+                                                    chat_id=linked_chat_id,
+                                                    text=comment_text,
+                                                    message_thread_id=message.message_id,
+                                                    parse_mode="HTML"
+                                                )
+                                                logger.info(f"✅ Комментарий успешно отправлен через aiogram!")
+                                            except Exception as aiogram_error:
+                                                logger.error(f"❌ Ошибка через aiogram: {aiogram_error}")
+                                                raise Exception(f"Не удалось отправить комментарий к посту: {retry_error}")
                                 else:
                                     raise Exception(f"Не удалось отправить комментарий к посту: {error_desc}")
                                 
