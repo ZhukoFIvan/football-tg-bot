@@ -42,25 +42,38 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
         logger.info(f"Текст комментария: {comment_text[:50]}...")
         logger.info(f"ID поста в канале: {current_message_id}")
         
-        # Увеличиваем задержку, чтобы Telegram успел создать сообщение в группе обсуждений
-        # и обработать пост в канале
-        # Разбиваем задержку на части, чтобы проверять актуальность
+        # Сначала ждем 5 секунд, чтобы "собрать" все посты, которые могут прийти подряд
+        # Это нужно, чтобы обработать только последний пост из серии
+        logger.info("Ожидание 5 секунд для сбора всех постов...")
+        for _ in range(10):  # 10 раз по 0.5 секунды = 5 секунд
+            await asyncio.sleep(0.5)
+            async with _post_lock:
+                if channel_id in _last_post_ids:
+                    last_message_id = _last_post_ids[channel_id]
+                    # Если текущий пост НЕ является последним - отменяем обработку
+                    if current_message_id != last_message_id:
+                        logger.info(f"❌ Пост {current_message_id} НЕ является последним! Последний пост: {last_message_id}. Отменяю обработку.")
+                        return
+        
+        # Дополнительная задержка, чтобы Telegram успел создать сообщение в группе обсуждений
         logger.info("Ожидание 3 секунд перед отправкой комментария...")
         for _ in range(6):  # 6 раз по 0.5 секунды = 3 секунды
             await asyncio.sleep(0.5)
             async with _post_lock:
                 if channel_id in _last_post_ids:
                     last_message_id = _last_post_ids[channel_id]
-                    if current_message_id < last_message_id:
-                        logger.info(f"Пост {current_message_id} устарел во время ожидания, появился новый пост {last_message_id}. Пропускаем.")
+                    # Если текущий пост НЕ является последним - отменяем обработку
+                    if current_message_id != last_message_id:
+                        logger.info(f"❌ Пост {current_message_id} НЕ является последним! Последний пост: {last_message_id}. Отменяю обработку.")
                         return
         
         # Проверяем еще раз перед отправкой (на случай, если за время задержки пришел новый пост)
         async with _post_lock:
             if channel_id in _last_post_ids:
                 last_message_id = _last_post_ids[channel_id]
-                if current_message_id < last_message_id:
-                    logger.info(f"Пост {current_message_id} устарел перед отправкой, появился новый пост {last_message_id}. Пропускаем.")
+                # Если текущий пост НЕ является последним - отменяем обработку
+                if current_message_id != last_message_id:
+                    logger.info(f"❌ Пост {current_message_id} НЕ является последним перед отправкой! Последний пост: {last_message_id}. Отменяю обработку.")
                     return
         
         # Для комментариев к посту в канале нужно использовать reply_to_message_id
@@ -92,16 +105,18 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
                     async with _post_lock:
                         if channel_id in _last_post_ids:
                             last_message_id = _last_post_ids[channel_id]
-                            if current_message_id < last_message_id:
-                                logger.info(f"Пост {current_message_id} устарел во время повтора, появился новый пост {last_message_id}. Пропускаем.")
+                            # Если текущий пост НЕ является последним - отменяем обработку
+                            if current_message_id != last_message_id:
+                                logger.info(f"❌ Пост {current_message_id} НЕ является последним во время повтора! Последний пост: {last_message_id}. Отменяю обработку.")
                                 return
                 
                 # Проверяем еще раз перед отправкой
                 async with _post_lock:
                     if channel_id in _last_post_ids:
                         last_message_id = _last_post_ids[channel_id]
-                        if current_message_id < last_message_id:
-                            logger.info(f"Пост {current_message_id} устарел перед повторной отправкой. Пропускаем.")
+                        # Если текущий пост НЕ является последним - отменяем обработку
+                        if current_message_id != last_message_id:
+                            logger.info(f"❌ Пост {current_message_id} НЕ является последним перед повторной отправкой! Последний пост: {last_message_id}. Отменяю обработку.")
                             return
                 
                 try:
@@ -193,12 +208,17 @@ async def handle_channel_post(message: Message, bot: Bot):
         
         # Отменяем предыдущую задачу для этого канала, если она существует
         old_task = None
+        old_message_id = None
         async with _post_lock:
             if channel_id in _active_tasks:
                 old_task = _active_tasks[channel_id]
+                task_status = "done" if old_task.done() else ("cancelled" if old_task.cancelled() else "running")
+                logger.info(f"Найдена предыдущая задача для канала {channel_id}, статус: {task_status}")
                 if not old_task.done() and not old_task.cancelled():
-                    logger.info(f"Отменяю обработку предыдущего поста, так как получен новый пост {current_message_id}")
+                    logger.info(f"⚠️ Отменяю обработку предыдущего поста, так как получен новый пост {current_message_id}")
                     old_task.cancel()
+                else:
+                    logger.info(f"Предыдущая задача уже завершена или отменена, пропускаем отмену")
                 del _active_tasks[channel_id]
             
             # Обновляем последний message_id для этого канала
@@ -206,14 +226,19 @@ async def handle_channel_post(message: Message, bot: Bot):
                 old_message_id = _last_post_ids[channel_id]
                 if old_message_id != current_message_id:
                     logger.info(f"Получен новый пост {current_message_id}, предыдущий был {old_message_id}. Обновляю.")
+            else:
+                logger.info(f"Первый пост для канала {channel_id}, message_id: {current_message_id}")
             _last_post_ids[channel_id] = current_message_id
         
         # Ждем отмены предыдущей задачи вне lock, чтобы не блокировать
         if old_task and not old_task.done():
             try:
                 await asyncio.wait_for(old_task, timeout=0.1)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                logger.debug(f"Предыдущая задача отменена или таймаут")
+                logger.info(f"✅ Предыдущая задача успешно отменена")
+            except asyncio.CancelledError:
+                logger.info(f"✅ Предыдущая задача отменена (CancelledError)")
+            except asyncio.TimeoutError:
+                logger.debug(f"Таймаут при ожидании отмены задачи")
             except Exception as e:
                 logger.debug(f"Ошибка при ожидании отмены задачи: {e}")
         
