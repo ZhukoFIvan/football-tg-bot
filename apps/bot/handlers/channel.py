@@ -17,12 +17,118 @@ from core.config import settings
 router = Router()
 logger = logging.getLogger(__name__)
 
+# Словарь для хранения активных задач обработки постов по каналам
+# Ключ: channel_id, Значение: (task, last_message_id)
+_active_post_tasks: dict[int, tuple[asyncio.Task, int]] = {}
+
+
+async def _process_post_comment(message: Message, bot: Bot, comment_text: str, linked_chat_id: int):
+    """
+    Внутренняя функция для обработки комментария к посту
+    """
+    try:
+        logger.info(f"Найдена группа обсуждений: {linked_chat_id}")
+        logger.info(f"Текст комментария: {comment_text[:50]}...")
+        logger.info(f"ID поста в канале: {message.message_id}")
+        
+        # Увеличиваем задержку, чтобы Telegram успел создать сообщение в группе обсуждений
+        # и обработать пост в канале
+        logger.info("Ожидание 3 секунд перед отправкой комментария...")
+        await asyncio.sleep(3)
+        
+        # Проверяем, не устарел ли этот пост (не появился ли новый)
+        channel_id = message.chat.id
+        if channel_id in _active_post_tasks:
+            task, last_message_id = _active_post_tasks[channel_id]
+            if last_message_id != message.message_id:
+                logger.info(f"Пост {message.message_id} устарел, появился новый пост {last_message_id}. Пропускаем.")
+                return
+        
+        # Для комментариев к посту в канале нужно использовать reply_to_message_id
+        # message_id поста в канале совпадает с message_id соответствующего сообщения в группе обсуждений
+        # Это создаст комментарий под постом, а не просто сообщение в чате
+        try:
+            logger.info(f"Отправляю комментарий в группу {linked_chat_id} с reply_to_message_id={message.message_id}")
+            
+            # Используем reply_to_message_id для создания комментария под постом
+            # Это правильный способ оставлять комментарии к постам в канале
+            await bot.send_message(
+                chat_id=linked_chat_id,  # ID группы обсуждений
+                text=comment_text,
+                reply_to_message_id=message.message_id,  # ID поста в канале (совпадает с ID сообщения в группе)
+                parse_mode="HTML"
+            )
+            logger.info(f"✅ Комментарий успешно отправлен под постом в канале!")
+                        
+        except Exception as e:
+            error_msg = str(e)
+            logger.warning(f"⚠️ Ошибка при отправке комментария через aiogram: {error_msg}")
+            
+            # Если ошибка, пробуем еще раз через 2 секунды (возможно, сообщение еще не создано в группе)
+            if "message to reply not found" in error_msg.lower() or "bad request" in error_msg.lower():
+                logger.info("Пробую еще раз через 2 секунды...")
+                await asyncio.sleep(2)
+                
+                # Проверяем еще раз, не устарел ли пост
+                if channel_id in _active_post_tasks:
+                    task, last_message_id = _active_post_tasks[channel_id]
+                    if last_message_id != message.message_id:
+                        logger.info(f"Пост {message.message_id} устарел во время повтора. Пропускаем.")
+                        return
+                
+                try:
+                    await bot.send_message(
+                        chat_id=linked_chat_id,
+                        text=comment_text,
+                        reply_to_message_id=message.message_id,
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"✅ Комментарий успешно отправлен после повтора!")
+                except Exception as retry_error:
+                    logger.error(f"❌ Ошибка после повтора: {retry_error}")
+                    
+                    # Пробуем через прямой HTTP запрос к API
+                    logger.info("Пробую через прямой HTTP запрос к API...")
+                    try:
+                        send_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+                        payload = {
+                            "chat_id": linked_chat_id,
+                            "text": comment_text,
+                            "reply_to_message_id": message.message_id,
+                            "parse_mode": "HTML"
+                        }
+                        
+                        async with aiohttp.ClientSession() as http_session:
+                            async with http_session.post(send_url, json=payload) as response:
+                                result = await response.json()
+                                logger.info(f"Ответ API: {result}")
+                                if result.get("ok"):
+                                    logger.info(f"✅ Комментарий успешно отправлен через HTTP API!")
+                                else:
+                                    api_error = result.get('description', 'Unknown error')
+                                    logger.error(f"❌ Ошибка через HTTP API: {api_error}")
+                                    raise Exception(f"Не удалось отправить комментарий к посту: {api_error}")
+                    except Exception as http_error:
+                        logger.error(f"❌ Ошибка через HTTP API: {http_error}")
+                        raise Exception(f"Не удалось отправить комментарий к посту: {http_error}")
+            else:
+                raise
+    finally:
+        # Удаляем задачу из словаря после завершения
+        channel_id = message.chat.id
+        if channel_id in _active_post_tasks:
+            task, last_message_id = _active_post_tasks[channel_id]
+            if last_message_id == message.message_id:
+                del _active_post_tasks[channel_id]
+                logger.debug(f"Задача для поста {message.message_id} завершена и удалена из очереди")
+
 
 @router.channel_post()
 async def handle_channel_post(message: Message, bot: Bot):
     """
     Обработчик новых постов в канале
     Отправляет комментарий в группу обсуждений канала
+    Обрабатывает только последний пост, отменяя обработку предыдущих
     """
     try:
         # Проверяем, что это действительно пост в канале, а не сообщение в группе
@@ -36,6 +142,20 @@ async def handle_channel_post(message: Message, bot: Bot):
             return
         
         logger.info(f"Получен пост в канале: {message.chat.id}, message_id: {message.message_id}, тип: {message.chat.type}")
+        
+        channel_id = message.chat.id
+        
+        # Отменяем предыдущую задачу для этого канала, если она существует
+        if channel_id in _active_post_tasks:
+            old_task, old_message_id = _active_post_tasks[channel_id]
+            if not old_task.done():
+                logger.info(f"Отменяю обработку предыдущего поста {old_message_id}, так как получен новый пост {message.message_id}")
+                old_task.cancel()
+                try:
+                    await old_task
+                except asyncio.CancelledError:
+                    logger.debug(f"Задача для поста {old_message_id} успешно отменена")
+            del _active_post_tasks[channel_id]
         
         # Получаем настройки из БД
         async with AsyncSessionLocal() as session:
@@ -108,76 +228,13 @@ async def handle_channel_post(message: Message, bot: Bot):
                     logger.warning("Убедитесь, что канал имеет связанную группу обсуждений")
                     return
                 
-                logger.info(f"Найдена группа обсуждений: {linked_chat_id}")
-                logger.info(f"Текст комментария: {comment_text[:50]}...")
-                logger.info(f"ID поста в канале: {message.message_id}")
-                
-                # Увеличиваем задержку, чтобы Telegram успел создать сообщение в группе обсуждений
-                # и обработать пост в канале
-                logger.info("Ожидание 3 секунд перед отправкой комментария...")
-                await asyncio.sleep(3)
-                
-                # Для комментариев к посту в канале нужно использовать reply_to_message_id
-                # message_id поста в канале совпадает с message_id соответствующего сообщения в группе обсуждений
-                # Это создаст комментарий под постом, а не просто сообщение в чате
-                try:
-                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} с reply_to_message_id={message.message_id}")
-                    
-                    # Используем reply_to_message_id для создания комментария под постом
-                    # Это правильный способ оставлять комментарии к постам в канале
-                    await bot.send_message(
-                        chat_id=linked_chat_id,  # ID группы обсуждений
-                        text=comment_text,
-                        reply_to_message_id=message.message_id,  # ID поста в канале (совпадает с ID сообщения в группе)
-                        parse_mode="HTML"
-                    )
-                    logger.info(f"✅ Комментарий успешно отправлен под постом в канале!")
-                                
-                except Exception as e:
-                    error_msg = str(e)
-                    logger.warning(f"⚠️ Ошибка при отправке комментария через aiogram: {error_msg}")
-                    
-                    # Если ошибка, пробуем еще раз через 2 секунды (возможно, сообщение еще не создано в группе)
-                    if "message to reply not found" in error_msg.lower() or "bad request" in error_msg.lower():
-                        logger.info("Пробую еще раз через 2 секунды...")
-                        await asyncio.sleep(2)
-                        try:
-                            await bot.send_message(
-                                chat_id=linked_chat_id,
-                                text=comment_text,
-                                reply_to_message_id=message.message_id,
-                                parse_mode="HTML"
-                            )
-                            logger.info(f"✅ Комментарий успешно отправлен после повтора!")
-                        except Exception as retry_error:
-                            logger.error(f"❌ Ошибка после повтора: {retry_error}")
-                            
-                            # Пробуем через прямой HTTP запрос к API
-                            logger.info("Пробую через прямой HTTP запрос к API...")
-                            try:
-                                send_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
-                                payload = {
-                                    "chat_id": linked_chat_id,
-                                    "text": comment_text,
-                                    "reply_to_message_id": message.message_id,
-                                    "parse_mode": "HTML"
-                                }
-                                
-                                async with aiohttp.ClientSession() as http_session:
-                                    async with http_session.post(send_url, json=payload) as response:
-                                        result = await response.json()
-                                        logger.info(f"Ответ API: {result}")
-                                        if result.get("ok"):
-                                            logger.info(f"✅ Комментарий успешно отправлен через HTTP API!")
-                                        else:
-                                            api_error = result.get('description', 'Unknown error')
-                                            logger.error(f"❌ Ошибка через HTTP API: {api_error}")
-                                            raise Exception(f"Не удалось отправить комментарий к посту: {api_error}")
-                            except Exception as http_error:
-                                logger.error(f"❌ Ошибка через HTTP API: {http_error}")
-                                raise Exception(f"Не удалось отправить комментарий к посту: {http_error}")
-                    else:
-                        raise
+                # Создаем задачу для обработки этого поста
+                task = asyncio.create_task(
+                    _process_post_comment(message, bot, comment_text, linked_chat_id)
+                )
+                # Сохраняем задачу в словаре
+                _active_post_tasks[channel_id] = (task, message.message_id)
+                logger.info(f"Создана задача для обработки поста {message.message_id}")
                     
             except Exception as e:
                 logger.error(f"Ошибка при получении информации о канале: {e}", exc_info=True)
