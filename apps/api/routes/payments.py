@@ -337,10 +337,12 @@ async def freekassa_webhook(
             if user:
                 # Определяем бренд для текста поддержки
                 brand = settings.BRAND.lower() if hasattr(settings, 'BRAND') else "noonyashop"
-                support_text = "@romixstore_support / @noonyashop_support" if brand == "romixstore" else "@romixstore_support / @noonyashop_support"
+                if brand == "romixstore":
+                    support_text = "@romixstore_support"
+                else:
+                    support_text = "@noonyashop_support"
                 
-                message = f"""
-✅ <b>Платеж успешно выполнен!</b>
+                message = f"""✅ <b>Платеж успешно выполнен!</b>
 
 📦 Заказ #{order_id}
 💰 Сумма: {float(amount):,.2f} ₽
@@ -505,10 +507,12 @@ async def paypalych_webhook(
             if user:
                 # Определяем бренд для текста поддержки
                 brand = settings.BRAND.lower() if hasattr(settings, 'BRAND') else "noonyashop"
-                support_text = "@romixstore_support / @noonyashop_support" if brand == "romixstore" else "@romixstore_support / @noonyashop_support"
+                if brand == "romixstore":
+                    support_text = "@romixstore_support"
+                else:
+                    support_text = "@noonyashop_support"
                 
-                message = f"""
-✅ <b>Платеж успешно выполнен!</b>
+                message = f"""✅ <b>Платеж успешно выполнен!</b>
 
 📦 Заказ #{order_id}
 💰 Сумма: {float(amount):,.2f} ₽
