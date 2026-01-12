@@ -40,20 +40,67 @@ async def migrate_from_old_bot(
     if new_db_url is None:
         new_db_url = settings.DATABASE_URL
     
-    logger.info(f"🔗 Старая БД: {old_db_url.split('@')[1] if '@' in old_db_url else 'скрыто'}")
-    logger.info(f"🔗 Новая БД: {new_db_url.split('@')[1] if '@' in new_db_url else 'скрыто'}")
+    # Показываем информацию о БД (скрываем пароль)
+    old_db_display = old_db_url.split('@')[1] if '@' in old_db_url else old_db_url
+    new_db_display = new_db_url.split('@')[1] if '@' in new_db_url else new_db_url
+    logger.info(f"🔗 Старая БД: {old_db_display}")
+    logger.info(f"🔗 Новая БД: {new_db_display}")
     
     if dry_run:
         logger.info("⚠️  РЕЖИМ ПРОВЕРКИ (dry-run) - изменения не будут применены")
     
     # Создаем подключения к БД
-    old_engine = create_async_engine(old_db_url, echo=False)
-    new_engine = create_async_engine(new_db_url, echo=False)
+    logger.info("🔌 Подключение к базам данных...")
+    try:
+        old_engine = create_async_engine(old_db_url, echo=False, pool_pre_ping=True)
+        new_engine = create_async_engine(new_db_url, echo=False, pool_pre_ping=True)
+    except Exception as e:
+        logger.error(f"❌ Ошибка при создании подключений: {e}")
+        raise
     
     old_session_factory = async_sessionmaker(old_engine, class_=AsyncSession, expire_on_commit=False)
     new_session_factory = async_sessionmaker(new_engine, class_=AsyncSession, expire_on_commit=False)
     
     try:
+        # Проверяем подключение к старой БД
+        logger.info("🔍 Проверка подключения к старой БД...")
+        try:
+            async with old_session_factory() as test_session:
+                await test_session.execute(select(1))
+            logger.info("✅ Подключение к старой БД успешно")
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"❌ Не удалось подключиться к старой БД!")
+            logger.error(f"   Ошибка: {error_msg}")
+            logger.error("")
+            logger.error("💡 Возможные решения:")
+            logger.error("   1. Проверьте правильность URL старой БД")
+            if "name resolution" in error_msg.lower() or "gaierror" in error_msg.lower():
+                logger.error("   2. ❗ ПРОБЛЕМА: Хост не может быть разрешен (не найден)")
+                logger.error("      Если старая БД на том же сервере, используйте:")
+                logger.error("      - 'postgres' (имя контейнера PostgreSQL в Docker)")
+                logger.error("      - 'localhost' или '127.0.0.1' (если БД на хосте)")
+                logger.error("")
+                logger.error("   Примеры правильных URL:")
+                logger.error("     postgresql+asyncpg://postgres:password@postgres:5432/old_database")
+                logger.error("     postgresql+asyncpg://postgres:password@localhost:5432/old_database")
+            else:
+                logger.error("   2. Проверьте доступность хоста и порта")
+                logger.error("   3. Убедитесь, что старая БД запущена")
+            logger.error("   4. Проверьте правильность имени базы данных")
+            logger.error("   5. Проверьте правильность логина и пароля")
+            raise
+        
+        # Проверяем подключение к новой БД
+        logger.info("🔍 Проверка подключения к новой БД...")
+        try:
+            async with new_session_factory() as test_session:
+                await test_session.execute(select(1))
+            logger.info("✅ Подключение к новой БД успешно")
+        except Exception as e:
+            logger.error(f"❌ Не удалось подключиться к новой БД: {e}")
+            raise
+        
         async with old_session_factory() as old_session, new_session_factory() as new_session:
             # Получаем всех пользователей из старой БД
             logger.info("📥 Получение пользователей из старой БД...")
