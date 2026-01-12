@@ -114,66 +114,70 @@ async def handle_channel_post(message: Message, bot: Bot):
                 
                 # Увеличиваем задержку, чтобы Telegram успел создать сообщение в группе обсуждений
                 # и обработать пост в канале
-                logger.info("Ожидание 5 секунд перед отправкой комментария...")
-                await asyncio.sleep(5)
+                logger.info("Ожидание 3 секунд перед отправкой комментария...")
+                await asyncio.sleep(3)
                 
-                # Для комментариев к посту в канале нужно использовать message_thread_id
-                # message_thread_id должен быть равен message_id поста в канале
-                # Это создаст комментарий в треде, связанном с постом
+                # Для комментариев к посту в канале нужно использовать reply_to_message_id
+                # message_id поста в канале совпадает с message_id соответствующего сообщения в группе обсуждений
+                # Это создаст комментарий под постом, а не просто сообщение в чате
                 try:
-                    send_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} с reply_to_message_id={message.message_id}")
                     
-                    logger.info(f"Отправляю комментарий в группу {linked_chat_id} с message_thread_id={message.message_id}")
-                    
-                    # Используем message_thread_id для создания комментария в треде поста
-                    payload = {
-                        "chat_id": linked_chat_id,  # ID группы обсуждений
-                        "text": comment_text,
-                        "message_thread_id": message.message_id,  # ID поста в канале как thread_id
-                        "parse_mode": "HTML"
-                    }
-                    
-                    async with aiohttp.ClientSession() as http_session:
-                        async with http_session.post(send_url, json=payload) as response:
-                            result = await response.json()
-                            logger.info(f"Ответ API: {result}")
-                            if result.get("ok"):
-                                logger.info(f"✅ Комментарий успешно отправлен к посту в канале! Message ID: {result.get('result', {}).get('message_id')}")
-                            else:
-                                error_desc = result.get('description', 'Unknown error')
-                                logger.warning(f"⚠️ Ошибка с message_thread_id: {error_desc}")
-                                
-                                # Если ошибка, пробуем еще раз через 2 секунды
-                                if "message thread not found" in error_desc.lower() or "bad request" in error_desc.lower():
-                                    logger.info("Пробую еще раз через 2 секунды...")
-                                    await asyncio.sleep(2)
-                                    async with http_session.post(send_url, json=payload) as retry_response:
-                                        retry_result = await retry_response.json()
-                                        logger.info(f"Ответ API после повтора: {retry_result}")
-                                        if retry_result.get("ok"):
-                                            logger.info(f"✅ Комментарий успешно отправлен после повтора!")
-                                        else:
-                                            retry_error = retry_result.get('description', 'Unknown error')
-                                            logger.error(f"❌ Ошибка после повтора: {retry_error}")
-                                            
-                                            # Пробуем через aiogram с message_thread_id
-                                            logger.info("Пробую через aiogram с message_thread_id")
-                                            try:
-                                                await bot.send_message(
-                                                    chat_id=linked_chat_id,
-                                                    text=comment_text,
-                                                    message_thread_id=message.message_id,
-                                                    parse_mode="HTML"
-                                                )
-                                                logger.info(f"✅ Комментарий успешно отправлен через aiogram!")
-                                            except Exception as aiogram_error:
-                                                logger.error(f"❌ Ошибка через aiogram: {aiogram_error}")
-                                                raise Exception(f"Не удалось отправить комментарий к посту: {retry_error}")
-                                else:
-                                    raise Exception(f"Не удалось отправить комментарий к посту: {error_desc}")
+                    # Используем reply_to_message_id для создания комментария под постом
+                    # Это правильный способ оставлять комментарии к постам в канале
+                    await bot.send_message(
+                        chat_id=linked_chat_id,  # ID группы обсуждений
+                        text=comment_text,
+                        reply_to_message_id=message.message_id,  # ID поста в канале (совпадает с ID сообщения в группе)
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"✅ Комментарий успешно отправлен под постом в канале!")
                                 
                 except Exception as e:
-                    logger.error(f"Ошибка при отправке комментария: {e}", exc_info=True)
+                    error_msg = str(e)
+                    logger.warning(f"⚠️ Ошибка при отправке комментария через aiogram: {error_msg}")
+                    
+                    # Если ошибка, пробуем еще раз через 2 секунды (возможно, сообщение еще не создано в группе)
+                    if "message to reply not found" in error_msg.lower() or "bad request" in error_msg.lower():
+                        logger.info("Пробую еще раз через 2 секунды...")
+                        await asyncio.sleep(2)
+                        try:
+                            await bot.send_message(
+                                chat_id=linked_chat_id,
+                                text=comment_text,
+                                reply_to_message_id=message.message_id,
+                                parse_mode="HTML"
+                            )
+                            logger.info(f"✅ Комментарий успешно отправлен после повтора!")
+                        except Exception as retry_error:
+                            logger.error(f"❌ Ошибка после повтора: {retry_error}")
+                            
+                            # Пробуем через прямой HTTP запрос к API
+                            logger.info("Пробую через прямой HTTP запрос к API...")
+                            try:
+                                send_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+                                payload = {
+                                    "chat_id": linked_chat_id,
+                                    "text": comment_text,
+                                    "reply_to_message_id": message.message_id,
+                                    "parse_mode": "HTML"
+                                }
+                                
+                                async with aiohttp.ClientSession() as http_session:
+                                    async with http_session.post(send_url, json=payload) as response:
+                                        result = await response.json()
+                                        logger.info(f"Ответ API: {result}")
+                                        if result.get("ok"):
+                                            logger.info(f"✅ Комментарий успешно отправлен через HTTP API!")
+                                        else:
+                                            api_error = result.get('description', 'Unknown error')
+                                            logger.error(f"❌ Ошибка через HTTP API: {api_error}")
+                                            raise Exception(f"Не удалось отправить комментарий к посту: {api_error}")
+                            except Exception as http_error:
+                                logger.error(f"❌ Ошибка через HTTP API: {http_error}")
+                                raise Exception(f"Не удалось отправить комментарий к посту: {http_error}")
+                    else:
+                        raise
                     
             except Exception as e:
                 logger.error(f"Ошибка при получении информации о канале: {e}", exc_info=True)
