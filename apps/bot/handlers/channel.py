@@ -4,6 +4,8 @@
 import logging
 import re
 import json
+import asyncio
+import aiohttp
 from aiogram import Router, Bot
 from aiogram.types import Message
 from sqlalchemy import select
@@ -100,31 +102,48 @@ async def handle_channel_post(message: Message, bot: Bot):
                 logger.info(f"Найдена группа обсуждений: {linked_chat_id}")
                 logger.info(f"Текст комментария: {comment_text[:50]}...")
                 
-                # Отправляем комментарий сразу же без задержки
-                # В группах обсуждений для комментариев к посту нужно использовать message_thread_id
+                # Небольшая задержка, чтобы Telegram успел создать тред в группе обсуждений
+                await asyncio.sleep(1)
+                
+                # Отправляем комментарий к посту
+                # В группах обсуждений для комментариев к посту канала нужно использовать message_thread_id
                 # message_thread_id должен быть равен message_id поста в канале
                 try:
                     logger.info(f"Отправляю комментарий в группу {linked_chat_id} с thread_id {message.message_id}")
-                    await bot.send_message(
-                        chat_id=linked_chat_id,
-                        text=comment_text,
-                        message_thread_id=message.message_id,  # Это создает комментарий к посту
-                        parse_mode="HTML"
-                    )
-                    logger.info(f"✅ Комментарий успешно отправлен в группу обсуждений {linked_chat_id} для поста {message.message_id}")
+                    
+                    # Пробуем использовать прямой вызов API через aiohttp для более точного контроля
+                    api_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
+                    
+                    payload = {
+                        "chat_id": linked_chat_id,
+                        "text": comment_text,
+                        "message_thread_id": message.message_id,
+                        "parse_mode": "HTML"
+                    }
+                    
+                    async with aiohttp.ClientSession() as http_session:
+                        async with http_session.post(api_url, json=payload) as response:
+                            result = await response.json()
+                            if result.get("ok"):
+                                logger.info(f"✅ Комментарий успешно отправлен через прямой API: {result.get('result', {}).get('message_id')}")
+                            else:
+                                logger.error(f"❌ Ошибка API: {result}")
+                                raise Exception(f"API error: {result.get('description')}")
+                                
                 except Exception as e:
-                    logger.error(f"Ошибка при отправке комментария с thread_id: {e}", exc_info=True)
-                    # Если не получилось с thread_id, пробуем без него (fallback)
+                    logger.error(f"Ошибка при отправке комментария через прямой API: {e}", exc_info=True)
+                    # Fallback: пробуем через aiogram
                     try:
-                        logger.info("Пробую отправить комментарий без thread_id")
+                        logger.info("Пробую отправить комментарий через aiogram")
                         await bot.send_message(
                             chat_id=linked_chat_id,
                             text=comment_text,
+                            message_thread_id=message.message_id,
                             parse_mode="HTML"
                         )
-                        logger.info(f"✅ Комментарий отправлен в группу обсуждений без thread_id")
+                        logger.info(f"✅ Комментарий успешно отправлен через aiogram")
                     except Exception as e2:
-                        logger.error(f"Ошибка при отправке комментария без thread_id: {e2}", exc_info=True)
+                        logger.error(f"Ошибка при отправке комментария через aiogram: {e2}", exc_info=True)
                     
             except Exception as e:
                 logger.error(f"Ошибка при получении информации о канале: {e}", exc_info=True)
