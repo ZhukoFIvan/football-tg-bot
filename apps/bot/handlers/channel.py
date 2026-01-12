@@ -112,36 +112,53 @@ async def handle_channel_post(message: Message, bot: Bot):
                 logger.info(f"Текст комментария: {comment_text[:50]}...")
                 logger.info(f"ID поста в канале: {message.message_id}")
                 
-                # Небольшая задержка, чтобы Telegram успел обработать пост
-                await asyncio.sleep(1)
+                # Небольшая задержка, чтобы Telegram успел создать сообщение в группе обсуждений
+                await asyncio.sleep(3)
                 
-                # Для комментариев к посту в канале нужно использовать специальный формат chat_id
-                # Формат: chat_id = "{group_id}_{channel_message_id}" (строка!)
-                # Это единственный способ отправить комментарий, который будет отображаться как комментарий к посту
+                # Для комментариев к посту в канале используем специальный формат chat_id
+                # Формат должен быть строкой: "{group_id}_{channel_message_id}"
+                # НО! В Telegram API это работает только если передать как строку БЕЗ преобразования
                 try:
-                    # Формируем специальный chat_id для комментария к посту
-                    comment_chat_id = f"{linked_chat_id}_{message.message_id}"
-                    logger.info(f"Отправляю комментарий с chat_id={comment_chat_id}")
-                    
                     send_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage"
                     
-                    # Используем специальный формат chat_id для комментария к посту в канале
-                    payload = {
-                        "chat_id": comment_chat_id,  # Специальный формат: "{group_id}_{message_id}"
-                        "text": comment_text,
-                        "parse_mode": "HTML"
-                    }
+                    # Формируем chat_id для комментария к посту
+                    # Важно: это должна быть строка вида "-1001234567890_123"
+                    comment_chat_id_str = f"{linked_chat_id}_{message.message_id}"
+                    logger.info(f"Отправляю комментарий с chat_id='{comment_chat_id_str}'")
+                    
+                    # Пробуем отправить через прямой API запрос
+                    # Используем form-data вместо json, так как chat_id должен быть строкой
+                    form_data = aiohttp.FormData()
+                    form_data.add_field('chat_id', comment_chat_id_str)  # Строка напрямую
+                    form_data.add_field('text', comment_text)
+                    form_data.add_field('parse_mode', 'HTML')
                     
                     async with aiohttp.ClientSession() as http_session:
-                        async with http_session.post(send_url, json=payload) as response:
+                        async with http_session.post(send_url, data=form_data) as response:
                             result = await response.json()
-                            logger.info(f"Ответ API с специальным chat_id: {result}")
+                            logger.info(f"Ответ API (form-data): {result}")
                             if result.get("ok"):
                                 logger.info(f"✅ Комментарий успешно отправлен к посту! Message ID: {result.get('result', {}).get('message_id')}")
                             else:
                                 error_desc = result.get('description', 'Unknown error')
-                                logger.error(f"❌ Ошибка при отправке комментария: {error_desc}")
-                                raise Exception(f"Не удалось отправить комментарий: {error_desc}")
+                                logger.warning(f"⚠️ Ошибка с form-data: {error_desc}")
+                                
+                                # Пробуем через JSON, но chat_id как строка
+                                logger.info("Пробую через JSON с chat_id как строка")
+                                payload = {
+                                    "chat_id": comment_chat_id_str,  # Строка
+                                    "text": comment_text,
+                                    "parse_mode": "HTML"
+                                }
+                                async with http_session.post(send_url, json=payload) as json_response:
+                                    json_result = await json_response.json()
+                                    logger.info(f"Ответ API (JSON): {json_result}")
+                                    if json_result.get("ok"):
+                                        logger.info(f"✅ Комментарий успешно отправлен через JSON!")
+                                    else:
+                                        json_error = json_result.get('description', 'Unknown error')
+                                        logger.error(f"❌ Ошибка через JSON: {json_error}")
+                                        raise Exception(f"Не удалось отправить комментарий. Form-data: {error_desc}, JSON: {json_error}")
                                 
                 except Exception as e:
                     logger.error(f"Ошибка при отправке комментария: {e}", exc_info=True)
