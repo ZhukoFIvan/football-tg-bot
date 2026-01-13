@@ -91,6 +91,8 @@ async def migrate_from_sqlite(
             search_root / "apps" / "api" / sqlite_db_path,
             root_dir / sqlite_db_path,  # Fallback
             root_dir / "apps" / sqlite_db_path,  # Fallback
+            Path.home() / "shop.db",  # В домашней директории
+            Path("/tmp") / sqlite_db_path,  # В /tmp
         ]
         
         for possible_path in possible_paths:
