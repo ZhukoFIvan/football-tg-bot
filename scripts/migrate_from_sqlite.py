@@ -10,12 +10,39 @@ from pathlib import Path
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
-import sqlite3
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+# Проверка зависимостей
+try:
+    import sqlite3
+except ImportError:
+    print("❌ Ошибка: модуль sqlite3 не найден!")
+    print("💡 SQLite3 обычно встроен в Python. Проверьте установку Python.")
+    sys.exit(1)
 
-from core.db.models import User
-from core.config import settings
+try:
+    from sqlalchemy import select, func
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+except ImportError as e:
+    print("❌ Ошибка: модуль sqlalchemy не установлен!")
+    print("\n📦 Установите зависимости:")
+    print("   1. Активируйте виртуальное окружение:")
+    print("      source venv/bin/activate")
+    print("   2. Установите зависимости:")
+    print("      pip install -r requirements.txt")
+    print("\n   Или установите только необходимые модули:")
+    print("      pip install sqlalchemy asyncpg")
+    print(f"\nДетали ошибки: {e}")
+    sys.exit(1)
+
+try:
+    from core.db.models import User
+    from core.config import settings
+except ImportError as e:
+    print(f"❌ Ошибка импорта из проекта: {e}")
+    print("\n💡 Убедитесь, что:")
+    print("   1. Вы находитесь в корневой директории проекта")
+    print("   2. Все зависимости установлены")
+    print("   3. Файл .env настроен правильно")
+    sys.exit(1)
 
 logging.basicConfig(
     level=logging.INFO,
