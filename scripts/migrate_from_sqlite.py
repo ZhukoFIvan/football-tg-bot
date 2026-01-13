@@ -136,9 +136,21 @@ async def migrate_from_sqlite(
         
         # Получаем всех пользователей из SQLite БД
         logger.info("📥 Получение пользователей из SQLite БД...")
-        cursor.execute("SELECT * FROM users WHERE is_banned = 0")
+        # Проверяем наличие колонки is_banned
+        cursor.execute("PRAGMA table_info(users)")
+        columns_info = cursor.fetchall()
+        column_names = [col[1] for col in columns_info]
+        has_is_banned = 'is_banned' in column_names
+        
+        if has_is_banned:
+            cursor.execute("SELECT * FROM users WHERE is_banned = 0")
+        else:
+            # Если колонки is_banned нет, получаем всех пользователей
+            logger.info("⚠️  Колонка 'is_banned' не найдена, мигрируем всех пользователей")
+            cursor.execute("SELECT * FROM users")
+        
         old_users = cursor.fetchall()
-        logger.info(f"✅ Найдено {len(old_users)} активных пользователей в SQLite БД")
+        logger.info(f"✅ Найдено {len(old_users)} пользователей в SQLite БД")
         
         if len(old_users) == 0:
             logger.warning("⚠️  В SQLite БД нет активных пользователей для миграции")
@@ -161,10 +173,11 @@ async def migrate_from_sqlite(
             for old_user_row in old_users:
                 # Преобразуем SQLite Row в словарь
                 old_user = dict(old_user_row)
-                telegram_id = old_user.get('telegram_id')
+                # В shop.db колонка называется user_id, а не telegram_id
+                telegram_id = old_user.get('telegram_id') or old_user.get('user_id') or old_user.get('id')
                 
                 if not telegram_id:
-                    logger.warning(f"⚠️  Пропущен пользователь без telegram_id: {old_user}")
+                    logger.warning(f"⚠️  Пропущен пользователь без telegram_id/user_id: {old_user}")
                     continue
                 
                 if telegram_id in existing_telegram_ids:
@@ -197,18 +210,42 @@ async def migrate_from_sqlite(
                 added_count = 0
                 for old_user in users_to_add:
                     try:
+                        # Получаем telegram_id (может быть user_id в shop.db)
+                        tg_id = old_user.get('telegram_id') or old_user.get('user_id') or old_user.get('id')
+                        
+                        # Обработка created_at
+                        created_at_val = old_user.get('created_at')
+                        if created_at_val and isinstance(created_at_val, str):
+                            try:
+                                from datetime import datetime
+                                created_at_val = datetime.strptime(created_at_val, '%Y-%m-%d %H:%M:%S')
+                            except:
+                                from datetime import datetime
+                                created_at_val = datetime.utcnow()
+                        elif not created_at_val:
+                            from datetime import datetime
+                            created_at_val = datetime.utcnow()
+                        
+                        updated_at_val = old_user.get('updated_at') or created_at_val
+                        if updated_at_val and isinstance(updated_at_val, str):
+                            try:
+                                from datetime import datetime
+                                updated_at_val = datetime.strptime(updated_at_val, '%Y-%m-%d %H:%M:%S')
+                            except:
+                                updated_at_val = created_at_val
+                        
                         new_user = User(
-                            telegram_id=old_user.get('telegram_id'),
-                            username=old_user.get('username'),
-                            first_name=old_user.get('first_name') or "",
-                            last_name=old_user.get('last_name') or "",
-                            is_banned=bool(old_user.get('is_banned', False)),
-                            is_admin=bool(old_user.get('is_admin', False)),
-                            bonus_balance=int(old_user.get('bonus_balance', 0) or 0),
-                            total_spent=float(old_user.get('total_spent', 0) or 0),
-                            total_orders=int(old_user.get('total_orders', 0) or 0),
-                            created_at=old_user.get('created_at'),
-                            updated_at=old_user.get('updated_at') or old_user.get('created_at')
+                            telegram_id=tg_id,
+                            username=old_user.get('username') or None,
+                            first_name=old_user.get('first_name') or None,
+                            last_name=old_user.get('last_name') or None,
+                            is_banned=bool(old_user.get('is_banned', False)) if 'is_banned' in old_user else False,
+                            is_admin=bool(old_user.get('is_admin', False)) if 'is_admin' in old_user else False,
+                            bonus_balance=int(old_user.get('bonus_balance', 0) or 0) if 'bonus_balance' in old_user else 0,
+                            total_spent=float(old_user.get('total_spent', 0) or 0) if 'total_spent' in old_user else 0,
+                            total_orders=int(old_user.get('total_orders', 0) or 0) if 'total_orders' in old_user else 0,
+                            created_at=created_at_val,
+                            updated_at=updated_at_val
                         )
                         new_session.add(new_user)
                         added_count += 1

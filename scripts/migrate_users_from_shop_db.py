@@ -6,13 +6,31 @@ import asyncio
 import sys
 from pathlib import Path
 from datetime import datetime
-from sqlalchemy import text
 
 # Добавить корневую директорию в путь
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.db.models import User
-from core.db.session import AsyncSessionLocal
+# Проверка зависимостей
+try:
+    from sqlalchemy import text
+except ImportError:
+    print("❌ Ошибка: модуль sqlalchemy не установлен!")
+    print("\n📦 Установите зависимости:")
+    print("   pip install -r requirements.txt")
+    print("\n   Или установите только необходимые модули:")
+    print("   pip install sqlalchemy asyncpg")
+    sys.exit(1)
+
+try:
+    from core.db.models import User
+    from core.db.session import AsyncSessionLocal
+except ImportError as e:
+    print(f"❌ Ошибка импорта: {e}")
+    print("\n💡 Убедитесь, что:")
+    print("   1. Вы находитесь в корневой директории проекта")
+    print("   2. Все зависимости установлены: pip install -r requirements.txt")
+    print("   3. Переменные окружения настроены (.env файл)")
+    sys.exit(1)
 
 
 def inspect_shop_db():
