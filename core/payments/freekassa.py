@@ -51,23 +51,40 @@ class FreeKassaProvider(PaymentProvider):
         """
         Генерация подписи для API запросов FreeKassa
         
-        Согласно документации API v1:
+        Согласно документации API v1 (раздел 2.2. Подпись запросов):
         1. Берем все ключи тела запроса (кроме signature)
         2. Сортируем их в алфавитном порядке
-        3. Берем их значения
+        3. Берем их значения и преобразуем в строки
         4. Соединяем значения через символ |
-        5. Используем HMAC SHA256 с API_KEY как ключом
+        5. Используем HMAC SHA256 с API_KEY как ключом для HMAC
         
-        ВАЖНО: signature НЕ должен быть в request_body при генерации подписи!
+        ВАЖНО: 
+        - signature НЕ должен быть в request_body при генерации подписи!
+        - Все значения должны быть преобразованы в строки
+        - Числа должны быть без лишних нулей (например, 10.0 -> "10" или "10.0" в зависимости от типа)
         """
-        # Создаем копию тела запроса без signature (если есть)
-        body_for_signature = {k: v for k, v in request_body.items() if k != "signature"}
+        # Создаем копию тела запроса без signature и None значений
+        # Согласно документации, None значения не должны участвовать в подписи
+        body_for_signature = {
+            k: v for k, v in request_body.items() 
+            if k != "signature" and v is not None
+        }
         
         # Сортируем ключи в алфавитном порядке
         sorted_keys = sorted(body_for_signature.keys())
         
-        # Берем значения в отсортированном порядке и соединяем через |
-        values = [str(body_for_signature[key]) for key in sorted_keys]
+        # Берем значения в отсортированном порядке и преобразуем в строки
+        # Важно: сохраняем оригинальный формат чисел (10.0 -> "10.0", не "10")
+        values = []
+        for key in sorted_keys:
+            value = body_for_signature[key]
+            # Преобразуем в строку с учетом типа
+            if isinstance(value, (float, int)):
+                # Для чисел сохраняем оригинальный формат (10.0 остается "10.0")
+                values.append(str(value))
+            else:
+                values.append(str(value))
+        
         sign_string = "|".join(values)
         
         # Генерируем HMAC SHA256 с API ключом как ключом для HMAC
@@ -77,7 +94,13 @@ class FreeKassaProvider(PaymentProvider):
             hashlib.sha256
         ).hexdigest()
         
-        logger.debug(f"Generating signature: sorted_keys={sorted_keys}, sign_string={sign_string[:50]}..., signature={signature[:20]}...")
+        # Подробное логирование для отладки
+        logger.info(f"🔐 Generating FreeKassa API signature:")
+        logger.info(f"   Sorted keys: {sorted_keys}")
+        logger.info(f"   Sign string (full): {sign_string}")
+        logger.info(f"   API key length: {len(api_key)} chars")
+        logger.info(f"   Signature: {signature}")
+        
         return signature
 
     async def verify_api_token(self) -> bool:
@@ -189,6 +212,7 @@ class FreeKassaProvider(PaymentProvider):
             
             # Тело запроса БЕЗ signature (signature добавим после генерации)
             # Согласно документации API, shopId, nonce должны быть в теле запроса
+            # Важно: amount должен быть числом (float), не строкой
             request_body = {
                 "shopId": shop_id_int,  # ID магазина (обязательно в теле запроса!)
                 "nonce": nonce,  # Уникальный ID запроса (обязательно в теле запроса!)
@@ -196,12 +220,15 @@ class FreeKassaProvider(PaymentProvider):
                 "i": payment_method_code,  # Способ оплаты
                 "email": email,  # Email клиента
                 "ip": ip,  # IP адрес клиента
-                "amount": float(amount),  # Сумма платежа
+                "amount": float(amount),  # Сумма платежа (число, не строка!)
                 "currency": currency.upper(),  # Валюта
                 "result_url": result_url,  # URL для webhook уведомлений
                 "success_url": success_url,  # URL для успешной оплаты
                 "fail_url": fail_url  # URL для неудачной оплаты
             }
+            
+            # Логируем тело запроса для отладки (перед генерацией подписи)
+            logger.debug(f"Request body before signature: {json.dumps(request_body, ensure_ascii=False, indent=2)}")
             
             # Генерируем подпись из тела запроса (БЕЗ signature!)
             signature = self._generate_api_signature(request_body, self.api_key)
