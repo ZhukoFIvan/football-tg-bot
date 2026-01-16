@@ -77,7 +77,9 @@ class PaypalychProvider(PaymentProvider):
         currency: str,
         description: str,
         user_id: int,
-        payment_method: str = "sbp" 
+        payment_method: str = "sbp",
+        user_email: Optional[str] = None,
+        user_ip: Optional[str] = None
     ) -> Dict:
         """
         Создать платеж в PayPaly через /api/v1/bill/create

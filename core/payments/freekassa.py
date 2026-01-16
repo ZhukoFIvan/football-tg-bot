@@ -74,13 +74,22 @@ class FreeKassaProvider(PaymentProvider):
         sorted_keys = sorted(body_for_signature.keys())
         
         # Берем значения в отсортированном порядке и преобразуем в строки
-        # Важно: сохраняем оригинальный формат чисел (10.0 -> "10.0", не "10")
+        # Важно: для чисел с плавающей точкой может потребоваться специальный формат
         values = []
         for key in sorted_keys:
             value = body_for_signature[key]
             # Преобразуем в строку с учетом типа
-            if isinstance(value, (float, int)):
-                # Для чисел сохраняем оригинальный формат (10.0 остается "10.0")
+            if isinstance(value, float):
+                # Для float пробуем разные форматы
+                # Вариант 1: как есть (10.0 -> "10.0")
+                # Вариант 2: без точки если целое (10.0 -> "10")
+                # Пробуем вариант без точки для целых чисел
+                if value == int(value):
+                    values.append(str(int(value)))
+                else:
+                    # Для дробных чисел используем формат без лишних нулей
+                    values.append(f"{value:.2f}".rstrip('0').rstrip('.'))
+            elif isinstance(value, int):
                 values.append(str(value))
             else:
                 values.append(str(value))
@@ -92,7 +101,7 @@ class FreeKassaProvider(PaymentProvider):
         # НО: возможно, нужно добавить API ключ в конец строки перед HMAC
         # Попробуем оба варианта - сначала стандартный HMAC
         
-        # Вариант 1: HMAC SHA256 (стандартный способ)
+        # Вариант 1: HMAC SHA256 (стандартный способ согласно документации)
         signature_hmac = hmac.new(
             api_key.encode('utf-8'),
             sign_string.encode('utf-8'),
@@ -103,9 +112,8 @@ class FreeKassaProvider(PaymentProvider):
         sign_string_with_key = f"{sign_string}|{api_key}"
         signature_sha256 = hashlib.sha256(sign_string_with_key.encode('utf-8')).hexdigest()
         
-        # Пробуем использовать SHA256 вариант (возможно, документация неточная)
-        # Если не сработает, можно вернуться к HMAC
-        signature = signature_sha256
+        # Используем HMAC вариант (стандартный согласно документации)
+        signature = signature_hmac
         
         # Подробное логирование для отладки (используем print для гарантированного вывода)
         print(f"🔐 Generating FreeKassa API signature:")
@@ -115,7 +123,7 @@ class FreeKassaProvider(PaymentProvider):
         print(f"   API key (first 10 chars): {api_key[:10]}...")
         print(f"   Signature (HMAC): {signature_hmac}")
         print(f"   Signature (SHA256): {signature_sha256}")
-        print(f"   Using: SHA256 (trying this first)")
+        print(f"   Using: HMAC SHA256 (standard)")
         
         logger.error(f"🔐 Generating FreeKassa API signature:")
         logger.error(f"   Sorted keys: {sorted_keys}")
@@ -124,7 +132,7 @@ class FreeKassaProvider(PaymentProvider):
         logger.error(f"   API key (first 10 chars): {api_key[:10]}...")
         logger.error(f"   Signature (HMAC): {signature_hmac}")
         logger.error(f"   Signature (SHA256): {signature_sha256}")
-        logger.error(f"   Using: SHA256 (trying this first)")
+        logger.error(f"   Using: HMAC SHA256 (standard)")
         
         return signature
 

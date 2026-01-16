@@ -17,13 +17,17 @@ class PaymentProvider(ABC):
         currency: str,
         description: str,
         user_id: int,
-        payment_method: str = "card"  # "card" для карты, "sbp" для СБП
+        payment_method: str = "card",  # "card" для карты, "sbp" для СБП
+        user_email: Optional[str] = None,
+        user_ip: Optional[str] = None
     ) -> Dict:
         """
         Создать платеж
 
         Args:
             payment_method: "card" для оплаты картой, "sbp" для СБП
+            user_email: Email пользователя (опционально)
+            user_ip: IP адрес пользователя (опционально)
 
         Returns:
             {
