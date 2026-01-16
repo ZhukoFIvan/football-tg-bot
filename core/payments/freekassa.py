@@ -51,8 +51,12 @@ class FreeKassaProvider(PaymentProvider):
         Генерация подписи для API запросов FreeKassa
         
         Формула: md5(shopId:nonce:api_key)
+        ВАЖНО: shopId должен быть числом (без пробелов и лишних символов)
         """
-        sign_string = f"{shop_id}:{nonce}:{api_key}"
+        # Убеждаемся, что shop_id - это число (убираем пробелы)
+        shop_id_clean = str(shop_id).strip()
+        sign_string = f"{shop_id_clean}:{nonce}:{api_key}"
+        logger.debug(f"Generating signature with: shopId={shop_id_clean}, nonce={nonce}, api_key={api_key[:10]}...")
         return hashlib.md5(sign_string.encode()).hexdigest()
 
     async def verify_api_token(self) -> bool:
@@ -132,8 +136,15 @@ class FreeKassaProvider(PaymentProvider):
             # Используем timestamp в миллисекундах для уникальности
             nonce = int(time.time() * 1000)
             
+            # Убеждаемся, что merchant_id - это число для подписи
+            try:
+                shop_id_for_signature = str(int(self.merchant_id)).strip()
+            except ValueError:
+                raise ValueError(f"FREEKASSA_MERCHANT_ID must be a number, got: {self.merchant_id}")
+            
             # Генерируем подпись для API запроса
-            signature = self._generate_api_signature(self.merchant_id, nonce, self.api_key)
+            signature = self._generate_api_signature(shop_id_for_signature, nonce, self.api_key)
+            logger.info(f"Generated signature: {signature[:20]}... (shopId={shop_id_for_signature}, nonce={nonce})")
             
             # Формируем email (реальный email или tgid@telegram.org)
             email = user_email if user_email else f"{user_id}@telegram.org"
@@ -154,11 +165,15 @@ class FreeKassaProvider(PaymentProvider):
             api_endpoint = f"{self.api_url}/orders/create"
             
             # Параметры запроса (query parameters)
+            # shopId должен быть числом согласно документации API
+            # Используем уже проверенный shop_id_for_signature
             query_params = {
-                "shopId": self.merchant_id,
+                "shopId": shop_id_for_signature,  # Передаем как строку (число в виде строки)
                 "nonce": str(nonce),
                 "signature": signature
             }
+            
+            logger.info(f"Query params: shopId={query_params['shopId']}, nonce={query_params['nonce']}, signature={query_params['signature'][:20]}...")
             
             # Тело запроса (JSON)
             request_body = {
@@ -195,6 +210,9 @@ class FreeKassaProvider(PaymentProvider):
                 # Формируем полный URL с query параметрами
                 query_string = urllib.parse.urlencode(query_params)
                 url_with_params = f"{api_endpoint}?{query_string}"
+                
+                logger.info(f"Request URL: {url_with_params}")
+                logger.info(f"Request body: {json.dumps(request_body, ensure_ascii=False)}")
                 
                 headers = {
                     "Content-Type": "application/json"
