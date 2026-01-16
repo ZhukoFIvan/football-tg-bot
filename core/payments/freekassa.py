@@ -176,7 +176,9 @@ class FreeKassaProvider(PaymentProvider):
             logger.info(f"Query params: shopId={query_params['shopId']}, nonce={query_params['nonce']}, signature={query_params['signature'][:20]}...")
             
             # Тело запроса (JSON)
+            # Согласно документации API, shopId также должен быть в теле запроса
             request_body = {
+                "shopId": int(shop_id_for_signature),  # ID магазина (обязательно в теле запроса!)
                 "paymentId": str(order_id),  # Номер заказа в нашем магазине
                 "i": payment_method_code,  # Способ оплаты
                 "email": email,  # Email клиента
