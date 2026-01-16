@@ -52,12 +52,11 @@ class FreeKassaProvider(PaymentProvider):
         Генерация подписи для API запросов FreeKassa
         
         Согласно документации API v1:
-        1. Берем все ключи тела запроса
+        1. Берем все ключи тела запроса (кроме signature)
         2. Сортируем их в алфавитном порядке
         3. Берем их значения
-        4. Соединяем через символ |
-        5. Подмешиваем API_KEY
-        6. Получаем HMAC SHA256
+        4. Соединяем значения через символ |
+        5. Используем HMAC SHA256 с API_KEY как ключом
         
         ВАЖНО: signature НЕ должен быть в request_body при генерации подписи!
         """
@@ -71,13 +70,10 @@ class FreeKassaProvider(PaymentProvider):
         values = [str(body_for_signature[key]) for key in sorted_keys]
         sign_string = "|".join(values)
         
-        # Добавляем API ключ
-        sign_string_with_key = f"{sign_string}|{api_key}"
-        
-        # Генерируем HMAC SHA256
+        # Генерируем HMAC SHA256 с API ключом как ключом для HMAC
         signature = hmac.new(
             api_key.encode('utf-8'),
-            sign_string_with_key.encode('utf-8'),
+            sign_string.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
         
