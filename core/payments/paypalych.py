@@ -112,11 +112,11 @@ class PaypalychProvider(PaymentProvider):
                 from core.config import settings
                 result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/paypalych"
                 # Получаем username бота из настроек (без хардкода!)
-                bot_username = settings.BOT_USERNAME if hasattr(settings, 'BOT_USERNAME') and settings.BOT_USERNAME and settings.BOT_USERNAME.strip() else None
+                bot_username = getattr(settings, 'BOT_USERNAME', '').strip()
                 if not bot_username:
                     raise ValueError(
                         "BOT_USERNAME не установлен в .env файле. "
-                        "Установите BOT_USERNAME=ваш_бот_username (например: Romlx_store_bot)"
+                        "Установите BOT_USERNAME=ваш_бот_username (например: Romlx_store_bot или Romix_store_bot)"
                     )
                 # Frontend страницы результатов (не API, а Next.js)
                 success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}&bot_username={bot_username}"
