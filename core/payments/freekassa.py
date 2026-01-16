@@ -106,15 +106,15 @@ class FreeKassaProvider(PaymentProvider):
         # Используем HMAC вариант (стандартный)
         signature = signature_hmac
         
-        # Подробное логирование для отладки
-        logger.info(f"🔐 Generating FreeKassa API signature:")
-        logger.info(f"   Sorted keys: {sorted_keys}")
-        logger.info(f"   Sign string (full): {sign_string}")
-        logger.info(f"   API key length: {len(api_key)} chars")
-        logger.info(f"   API key (first 10 chars): {api_key[:10]}...")
-        logger.info(f"   Signature (HMAC): {signature}")
-        logger.info(f"   Signature (SHA256): {signature_sha256}")
-        logger.info(f"   Using: HMAC SHA256")
+        # Подробное логирование для отладки (используем ERROR для гарантированного вывода)
+        logger.error(f"🔐 Generating FreeKassa API signature:")
+        logger.error(f"   Sorted keys: {sorted_keys}")
+        logger.error(f"   Sign string (full): {sign_string}")
+        logger.error(f"   API key length: {len(api_key)} chars")
+        logger.error(f"   API key (first 10 chars): {api_key[:10]}...")
+        logger.error(f"   Signature (HMAC): {signature}")
+        logger.error(f"   Signature (SHA256): {signature_sha256}")
+        logger.error(f"   Using: HMAC SHA256")
         
         return signature
 
