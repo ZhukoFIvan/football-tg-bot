@@ -2,7 +2,7 @@
 Корзина пользователя
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -344,7 +344,8 @@ async def clear_cart(
 async def create_payment(
     request: CreatePaymentRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    http_request: Request = None
 ):
     """
     Создать платеж для корзины
@@ -576,22 +577,47 @@ async def create_payment(
             )
     elif request.payment_method == "card":
         provider_name = "freekassa"
-        if not settings.FREEKASSA_MERCHANT_ID or not settings.FREEKASSA_SECRET_KEY or not settings.FREEKASSA_SECRET_KEY2:
+        if not settings.FREEKASSA_MERCHANT_ID or not settings.FREEKASSA_API_KEY or not settings.FREEKASSA_SECRET_KEY2:
             raise HTTPException(
                 status_code=500,
-                detail="FreeKassa is not configured. Please set FREEKASSA_MERCHANT_ID, FREEKASSA_SECRET_KEY and FREEKASSA_SECRET_KEY2"
+                detail="FreeKassa is not configured. Please set FREEKASSA_MERCHANT_ID, FREEKASSA_API_KEY and FREEKASSA_SECRET_KEY2 in .env file"
             )
-        provider = FreeKassaProvider(
-            merchant_id=settings.FREEKASSA_MERCHANT_ID,
-            secret_key=settings.FREEKASSA_SECRET_KEY,
-            secret_key2=settings.FREEKASSA_SECRET_KEY2
-        )
+        try:
+            provider = FreeKassaProvider(
+                merchant_id=settings.FREEKASSA_MERCHANT_ID,
+                api_key=settings.FREEKASSA_API_KEY,
+                secret_key2=settings.FREEKASSA_SECRET_KEY2
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=str(e)
+            )
+        
+        # Проверка минимальной суммы для FreeKassa
+        if final_amount < 1:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Минимальная сумма платежа для карты — 1 RUB. Текущая сумма: {final_amount} RUB. Пожалуйста, добавьте товары в корзину."
+            )
     else:
         raise HTTPException(
             status_code=400,
             detail=f"Неверный способ оплаты: {request.payment_method}. Доступны: 'card' (карта) или 'sbp' (СБП)"
         )
 
+    # Получаем IP клиента для FreeKassa
+    client_ip = None
+    if http_request:
+        # Пробуем получить IP из заголовков (для прокси/балансировщиков)
+        client_ip = http_request.headers.get("X-Forwarded-For")
+        if client_ip:
+            client_ip = client_ip.split(",")[0].strip()
+        if not client_ip:
+            client_ip = http_request.headers.get("X-Real-IP")
+        if not client_ip:
+            client_ip = http_request.client.host if http_request.client else None
+    
     # Создать платеж
     payment_data = await provider.create_payment(
         order_id=order.id,
@@ -599,7 +625,8 @@ async def create_payment(
         currency="RUB",
         description=description,
         user_id=current_user.id,
-        payment_method=request.payment_method
+        payment_method=request.payment_method,
+        user_ip=client_ip
     )
 
     # Сохранить платеж в БД

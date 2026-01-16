@@ -39,9 +39,10 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # Payment Providers - FreeKassa
-    FREEKASSA_MERCHANT_ID: str = ""
-    FREEKASSA_SECRET_KEY: str = ""  # Secret Key 1
-    FREEKASSA_SECRET_KEY2: str = ""  # Secret Key 2
+    FREEKASSA_MERCHANT_ID: str = ""  # Shop ID (ID магазина)
+    FREEKASSA_API_KEY: str = ""  # API ключ из личного кабинета (для API запросов)
+    FREEKASSA_SECRET_KEY: str = ""  # Secret Key 1 (для SCI, если используется)
+    FREEKASSA_SECRET_KEY2: str = ""  # Secret Key 2 (для проверки webhook)
 
     # Payment Providers - PayPaly
     PAYPALYCH_API_KEY: str = ""  # API ключ Paypalych (формат: merchant_id|api_key)

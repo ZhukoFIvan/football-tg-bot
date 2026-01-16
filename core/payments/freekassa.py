@@ -1,34 +1,83 @@
 """
-Оплата через FreeKassa
-https://www.freekassa.ru/
+Оплата через FreeKassa через API
+https://docs.freekassa.net/
 """
 from typing import Dict, Optional
 from decimal import Decimal
 import uuid
 import hashlib
+import logging
+import time
+import aiohttp
+import json
 import urllib.parse
 
 from core.payments.base import PaymentProvider
+from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class FreeKassaProvider(PaymentProvider):
-    """Провайдер оплаты через FreeKassa"""
+    """Провайдер оплаты через FreeKassa (API)"""
 
-    def __init__(self, merchant_id: str, secret_key: str, secret_key2: str):
-        self.merchant_id = merchant_id
-        self.secret_key = secret_key  # Secret Key 1
-        self.secret_key2 = secret_key2  # Secret Key 2
-        self.api_url = "https://pay.freekassa.ru/"
-
-    def _generate_signature(self, amount: Decimal, order_id: int, currency: str = "RUB") -> str:
-        """
-        Генерация подписи для FreeKassa
+    def __init__(self, merchant_id: str, api_key: str, secret_key2: str):
+        self.merchant_id = merchant_id  # Shop ID
+        self.api_key = api_key  # API ключ из личного кабинета
+        self.secret_key2 = secret_key2  # Secret Key 2 для проверки webhook
+        self.api_url = "https://api.fk.life/v1"
         
-        Формула: md5(merchant_id:amount:secret_key:order_id)
+        # Проверяем наличие обязательных параметров
+        if not merchant_id:
+            raise ValueError(
+                "merchant_id is required. Please set FREEKASSA_MERCHANT_ID in your .env file. "
+                "You can find merchant_id (shopId) in your FreeKassa merchant dashboard"
+            )
+        if not api_key:
+            raise ValueError(
+                "api_key is required. Please set FREEKASSA_API_KEY in your .env file. "
+                "You can find API key in your FreeKassa dashboard settings"
+            )
+        if not secret_key2:
+            raise ValueError(
+                "secret_key2 is required. Please set FREEKASSA_SECRET_KEY2 in your .env file. "
+                "This is Secret Key 2 from your FreeKassa dashboard (used for webhook verification)"
+            )
+        
+        logger.info(f"FreeKassaProvider initialized with merchant_id: {self.merchant_id}")
+
+    def _generate_api_signature(self, shop_id: str, nonce: int, api_key: str) -> str:
         """
-        amount_str = f"{amount:.2f}"
-        sign_string = f"{self.merchant_id}:{amount_str}:{self.secret_key}:{order_id}"
+        Генерация подписи для API запросов FreeKassa
+        
+        Формула: md5(shopId:nonce:api_key)
+        """
+        sign_string = f"{shop_id}:{nonce}:{api_key}"
         return hashlib.md5(sign_string.encode()).hexdigest()
+
+    async def verify_api_token(self) -> bool:
+        """
+        Проверить правильность настроек FreeKassa перед созданием платежа
+        
+        Проверяет формат и наличие всех необходимых параметров
+        """
+        try:
+            # Проверяем, что все параметры заполнены
+            if not self.merchant_id or not self.api_key or not self.secret_key2:
+                logger.error("FreeKassa configuration is incomplete")
+                return False
+            
+            # Проверяем формат merchant_id (обычно это число)
+            try:
+                int(self.merchant_id)
+            except ValueError:
+                logger.warning(f"FreeKassa merchant_id should be numeric, got: {self.merchant_id}")
+            
+            logger.info("FreeKassa configuration is valid")
+            return True
+        except Exception as e:
+            logger.error(f"Error verifying FreeKassa configuration: {e}", exc_info=True)
+            return False
 
     async def create_payment(
         self,
@@ -37,57 +86,214 @@ class FreeKassaProvider(PaymentProvider):
         currency: str,
         description: str,
         user_id: int,
-        payment_method: str = "card"  # "card" для карты, "sbp" для СБП
+        payment_method: str = "card",  # "card" для карты, "sbp" для СБП
+        user_email: Optional[str] = None,
+        user_ip: Optional[str] = None
     ) -> Dict:
         """
-        Создать платеж в FreeKassa
+        Создать платеж в FreeKassa через API
         
         Args:
             payment_method: "card" для оплаты картой, "sbp" для СБП
+            user_email: Email пользователя (если не указан, используется tgid@telegram.org)
+            user_ip: IP адрес пользователя (если не указан, используется IP сервера)
         """
-        # Генерируем подпись
-        signature = self._generate_signature(amount, order_id, currency)
+        # Проверяем настройки перед созданием платежа
+        logger.info("Verifying FreeKassa configuration...")
+        config_valid = await self.verify_api_token()
+        if not config_valid:
+            raise Exception(
+                "FreeKassa configuration is invalid. "
+                "Please check your FREEKASSA_MERCHANT_ID, FREEKASSA_API_KEY and FREEKASSA_SECRET_KEY2 in .env file."
+            )
         
-        # Определяем способ оплаты для FreeKassa
-        # FreeKassa использует параметр i для выбора способа оплаты
-        # i=1 - банковские карты (Visa, MasterCard, МИР)
-        # i=10 - СБП (Система быстрых платежей)
-        # Если не указать i, пользователь сможет выбрать способ оплаты на странице FreeKassa
-        payment_method_code = None
-        if payment_method == "card":
-            payment_method_code = "1"  # Банковские карты
-        elif payment_method == "sbp":
-            payment_method_code = "10"  # СБП
+        try:
+            # Проверяем минимальную сумму (обычно для FreeKassa минимум 1-10 RUB)
+            if amount < 1:
+                raise ValueError(
+                    f"Минимальная сумма платежа для FreeKassa — 1 RUB. "
+                    f"Текущая сумма: {amount} RUB."
+                )
+            
+            # Определяем способ оплаты для FreeKassa API
+            # i=36 - банковские карты РФ
+            # i=44 - СБП (QR код)
+            # i=43 - SberPay
+            payment_method_code = None
+            payment_method_name = "любой способ"
+            if payment_method == "card":
+                payment_method_code = 36  # Банковские карты РФ
+                payment_method_name = "банковская карта"
+            elif payment_method == "sbp":
+                payment_method_code = 44  # СБП (QR код)
+                payment_method_name = "СБП"
+            
+            # Генерируем nonce (уникальный ID запроса, должен быть больше предыдущего)
+            # Используем timestamp в миллисекундах для уникальности
+            nonce = int(time.time() * 1000)
+            
+            # Генерируем подпись для API запроса
+            signature = self._generate_api_signature(self.merchant_id, nonce, self.api_key)
+            
+            # Формируем email (реальный email или tgid@telegram.org)
+            email = user_email if user_email else f"{user_id}@telegram.org"
+            
+            # Формируем IP (IP клиента или сервера, можно передать IP сервера)
+            ip = user_ip if user_ip else "127.0.0.1"  # В реальности нужно получить IP клиента
+            
+            # ВАЖНО: result_url - URL для webhook уведомлений от FreeKassa
+            result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/freekassa"
+            # Получаем username бота из настроек
+            bot_username = settings.BOT_USERNAME if hasattr(settings, 'BOT_USERNAME') and settings.BOT_USERNAME else "noonyashop_bot"
+            # Frontend страницы результатов (не API, а Next.js)
+            success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}&bot_username={bot_username}"
+            fail_url = f"{settings.FRONTEND_URL}/payments/failed?order_id={order_id}&bot_username={bot_username}"
+            
+            # Формируем данные для API запроса
+            # Согласно документации: POST https://api.fk.life/v1/orders/create
+            api_endpoint = f"{self.api_url}/orders/create"
+            
+            # Параметры запроса (query parameters)
+            query_params = {
+                "shopId": self.merchant_id,
+                "nonce": str(nonce),
+                "signature": signature
+            }
+            
+            # Тело запроса (JSON)
+            request_body = {
+                "paymentId": str(order_id),  # Номер заказа в нашем магазине
+                "i": payment_method_code,  # Способ оплаты
+                "email": email,  # Email клиента
+                "ip": ip,  # IP адрес клиента
+                "amount": float(amount),  # Сумма платежа
+                "currency": currency.upper(),  # Валюта
+                "result_url": result_url,  # URL для webhook уведомлений
+                "success_url": success_url,  # URL для успешной оплаты
+                "fail_url": fail_url  # URL для неудачной оплаты
+            }
+            
+            # Логируем все параметры для отладки (без секретных ключей)
+            logger.info(
+                f"Creating FreeKassa payment via API:\n"
+                f"  Endpoint: {api_endpoint}\n"
+                f"  Shop ID: {self.merchant_id}\n"
+                f"  Nonce: {nonce}\n"
+                f"  Amount: {amount} {currency.upper()}\n"
+                f"  Order ID: {order_id}\n"
+                f"  Payment method: {payment_method_name} (code: {payment_method_code})\n"
+                f"  Email: {email}\n"
+                f"  IP: {ip}\n"
+                f"  Description: {description[:50]}...\n"
+                f"  Result URL (webhook): {result_url}\n"
+                f"  Success URL: {success_url}\n"
+                f"  Fail URL: {fail_url}"
+            )
+            
+            # Отправляем запрос к API FreeKassa
+            async with aiohttp.ClientSession() as session:
+                # Формируем полный URL с query параметрами
+                query_string = urllib.parse.urlencode(query_params)
+                url_with_params = f"{api_endpoint}?{query_string}"
+                
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                
+                async with session.post(
+                    url_with_params,
+                    json=request_body,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200 or response.status == 201:
+                        # Проверяем заголовок Location для получения ссылки на оплату
+                        location = response.headers.get("Location")
+                        
+                        if location:
+                            logger.info(f"FreeKassa payment created successfully. Location: {location}")
+                            
+                            # Также можно получить JSON ответ, если есть
+                            try:
+                                result = await response.json()
+                                logger.info(f"FreeKassa API response: {result}")
+                                
+                                # Если в ответе есть payment_id или order_id, используем его
+                                payment_id_from_api = result.get("id") or result.get("orderId") or result.get("paymentId")
+                                if payment_id_from_api:
+                                    payment_id = f"freekassa_{payment_id_from_api}"
+                                else:
+                                    payment_id = f"freekassa_{order_id}_{uuid.uuid4().hex[:8]}"
+                            except:
+                                payment_id = f"freekassa_{order_id}_{uuid.uuid4().hex[:8]}"
+                            
+                            return {
+                                "payment_id": payment_id,
+                                "payment_url": location,
+                                "status": "pending"
+                            }
+                        else:
+                            # Если Location нет, пробуем получить из JSON
+                            try:
+                                result = await response.json()
+                                payment_url = result.get("location") or result.get("url") or result.get("payment_url")
+                                
+                                if payment_url:
+                                    payment_id_from_api = result.get("id") or result.get("orderId") or result.get("paymentId")
+                                    if payment_id_from_api:
+                                        payment_id = f"freekassa_{payment_id_from_api}"
+                                    else:
+                                        payment_id = f"freekassa_{order_id}_{uuid.uuid4().hex[:8]}"
+                                    
+                                    return {
+                                        "payment_id": payment_id,
+                                        "payment_url": payment_url,
+                                        "status": "pending"
+                                    }
+                                else:
+                                    raise ValueError(f"No payment URL in response: {result}")
+                            except Exception as e:
+                                error_text = await response.text()
+                                raise Exception(
+                                    f"FreeKassa API не вернул ссылку на оплату. "
+                                    f"Status: {response.status}, Response: {error_text}"
+                                )
+                    else:
+                        # Пробуем распарсить JSON ошибки
+                        error_message = None
+                        try:
+                            error_json = await response.json()
+                            error_message = error_json.get("message") or error_json.get("error") or str(error_json)
+                        except:
+                            error_text = await response.text()
+                            error_message = error_text
+                        
+                        logger.error(
+                            f"FreeKassa API error {response.status}: {error_message}. "
+                            f"Request: shopId={self.merchant_id}, amount={amount}, order_id={order_id}"
+                        )
+                        
+                        # Если ошибка авторизации (401)
+                        if response.status == 401:
+                            raise Exception(
+                                f"❌ FreeKassa API: Ошибка авторизации (API ключ неверный).\n\n"
+                                f"📋 ЧТО ПРОВЕРИТЬ:\n\n"
+                                f"1️⃣ API ключ в .env файле:\n"
+                                f"   • Проверьте FREEKASSA_API_KEY в .env файле\n"
+                                f"   • Убедитесь, что ключ скопирован полностью, без пробелов\n"
+                                f"   • Создайте новый API ключ в личном кабинете FreeKassa\n\n"
+                                f"2️⃣ Убедитесь, что API ключ активен и имеет права на создание платежей\n\n"
+                                f"Ошибка от API: {error_message}"
+                            )
+                        
+                        raise Exception(f"FreeKassa API error {response.status}: {error_message}")
         
-        # Формируем URL для оплаты
-        # Параметры согласно документации FreeKassa:
-        # m - MERCHANT_ID (ID магазина)
-        # oa - сумма платежа
-        # o - MERCHANT_ORDER_ID (номер заказа)
-        # s - подпись (md5(merchant_id:amount:secret_key:order_id))
-        # currency - валюта (RUB)
-        # i - способ оплаты (опционально)
-        params = {
-            "m": self.merchant_id,
-            "oa": f"{amount:.2f}",
-            "o": str(order_id),
-            "s": signature,
-            "currency": currency,
-            "us_user_id": str(user_id),
-            "us_description": description[:255]  # Ограничение длины
-        }
-        
-        # Добавить способ оплаты, если указан
-        if payment_method_code:
-            params["i"] = payment_method_code
-        
-        payment_url = f"{self.api_url}?{urllib.parse.urlencode(params)}"
-        
-        return {
-            "payment_id": f"freekassa_{order_id}_{uuid.uuid4().hex[:8]}",
-            "payment_url": payment_url,
-            "status": "pending"
-        }
+        except ValueError as e:
+            # Пробрасываем ValueError как есть (для минимальной суммы)
+            raise
+        except Exception as e:
+            logger.error(f"Error creating FreeKassa payment: {e}", exc_info=True)
+            raise
 
     async def check_payment(self, payment_id: str) -> Dict:
         """
@@ -97,9 +303,7 @@ class FreeKassaProvider(PaymentProvider):
         но можно также проверить статус через API
         """
         # TODO: Реализовать проверку статуса через API FreeKassa
-        # Обычно FreeKassa отправляет уведомления на указанный URL
-        # Для проверки статуса можно использовать:
-        # GET https://www.freekassa.ru/api.php?merchant_id=...&s=...&action=get_order_status&order_id=...
+        # Можно использовать GET /orders с параметрами orderId или paymentId
         
         return {
             "payment_id": payment_id,
@@ -121,7 +325,7 @@ class FreeKassaProvider(PaymentProvider):
         Вернуть деньги
         
         TODO: Реализовать возврат через API FreeKassa
-        Обычно возвраты обрабатываются через личный кабинет или API
+        Можно использовать POST /orders/refund
         """
         return {
             "refund_id": f"refund_{payment_id}",
@@ -133,10 +337,32 @@ class FreeKassaProvider(PaymentProvider):
         """
         Проверить подпись webhook от FreeKassa
         
-        Формула для проверки: md5(merchant_id:amount:secret_key2:order_id)
+        Формула для проверки: md5(MERCHANT_ID:AMOUNT:SECRET_KEY2:MERCHANT_ORDER_ID)
+        
+        ВАЖНО: Для webhook используется SECRET_KEY2, а не API_KEY!
         """
-        amount_str = f"{amount:.2f}"
-        sign_string = f"{self.merchant_id}:{amount_str}:{self.secret_key2}:{order_id}"
-        expected_signature = hashlib.md5(sign_string.encode()).hexdigest()
-        return signature.lower() == expected_signature.lower()
-
+        if not signature:
+            logger.error("FreeKassa webhook signature is missing")
+            return False
+        
+        try:
+            amount_str = f"{amount:.2f}"
+            sign_string = f"{self.merchant_id}:{amount_str}:{self.secret_key2}:{order_id}"
+            expected_signature = hashlib.md5(sign_string.encode()).hexdigest()
+            
+            is_valid = signature.lower() == expected_signature.lower()
+            
+            if not is_valid:
+                logger.error(
+                    f"Invalid FreeKassa webhook signature for order {order_id}:\n"
+                    f"  Expected: {expected_signature}\n"
+                    f"  Received: {signature}\n"
+                    f"  Sign string: {sign_string}"
+                )
+            else:
+                logger.info(f"FreeKassa webhook signature verified for order {order_id}")
+            
+            return is_valid
+        except Exception as e:
+            logger.error(f"Error verifying FreeKassa webhook signature: {e}", exc_info=True)
+            return False

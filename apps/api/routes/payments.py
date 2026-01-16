@@ -245,6 +245,17 @@ async def update_payment_status(
 
 # ==================== WEBHOOK ENDPOINTS ====================
 
+@router.get("/webhook/freekassa")
+async def freekassa_webhook_get(request: Request):
+    """
+    GET endpoint для проверки доступности webhook от FreeKassa
+    
+    FreeKassa может проверять доступность endpoint через GET запрос
+    """
+    logger.info("FreeKassa webhook GET request (health check)")
+    return {"status": "ok", "message": "FreeKassa webhook endpoint is available"}
+
+
 @router.post("/webhook/freekassa")
 async def freekassa_webhook(
     request: Request,
@@ -265,8 +276,12 @@ async def freekassa_webhook(
     После успешной обработки необходимо вернуть строку "YES"
     """
     try:
+        logger.info(f"===== FREEKASSA WEBHOOK RECEIVED =====")
+        logger.info(f"Content-Type: {request.headers.get('content-type')}")
+
         # Получить данные из формы (FreeKassa отправляет form-data)
         form_data = await request.form()
+        logger.info(f"Form data: {dict(form_data)}")
 
         merchant_id = form_data.get("MERCHANT_ID")
         amount_str = form_data.get("AMOUNT")
@@ -303,16 +318,20 @@ async def freekassa_webhook(
 
         # Проверить подпись
         # Формула: md5(MERCHANT_ID:AMOUNT:SECRET_KEY2:MERCHANT_ORDER_ID)
+        logger.info(f"Verifying webhook signature for order {order_id}...")
         provider = FreeKassaProvider(
             merchant_id=settings.FREEKASSA_MERCHANT_ID,
-            secret_key=settings.FREEKASSA_SECRET_KEY,
+            api_key=settings.FREEKASSA_API_KEY,  # Для API, но для webhook нужен только secret_key2
             secret_key2=settings.FREEKASSA_SECRET_KEY2
         )
 
         if not provider.verify_webhook_signature(amount, order_id, signature):
             logger.error(
-                f"Неверная подпись для платежа {payment.id}. Получено: {signature}")
+                f"Неверная подпись для платежа {payment.id}. "
+                f"Order ID: {order_id}, Amount: {amount}, Signature: {signature}")
             return "NO"
+        
+        logger.info(f"Webhook signature verified successfully for order {order_id}")
 
         # Проверить сумму (допускаем небольшую погрешность из-за округления)
         amount_diff = abs(float(payment.amount) - float(amount))
@@ -325,12 +344,18 @@ async def freekassa_webhook(
         # Если webhook пришел, значит платеж успешен
         # Обновить статус платежа на success (если еще не обновлен)
         if payment.status != "success":
+            logger.info(f"Payment SUCCESS for order {order_id}, updating status...")
+            
             # Сохранить intid в payment_id, если он есть (внутренний ID платежа от FreeKassa)
             if intid:
                 # Обновить payment_id с intid для лучшей трассировки
                 payment.payment_id = f"freekassa_{intid}"
+                logger.info(f"Updated payment_id with intid: {intid}")
 
             await update_payment_status(payment, "success", db, paid_at=datetime.utcnow())
+            logger.info(
+                f"Payment status updated successfully. "
+                f"Bonus earned: {payment.order.bonus_earned if payment.order else 'N/A'}")
 
             # Отправить уведомление пользователю
             user = payment.user
