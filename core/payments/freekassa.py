@@ -87,19 +87,34 @@ class FreeKassaProvider(PaymentProvider):
         
         sign_string = "|".join(values)
         
-        # Генерируем HMAC SHA256 с API ключом как ключом для HMAC
-        signature = hmac.new(
+        # Согласно документации FreeKassa API v1:
+        # Подпись формируется как HMAC SHA256 от строки значений с API ключом как ключом HMAC
+        # НО: возможно, нужно добавить API ключ в конец строки перед HMAC
+        # Попробуем оба варианта - сначала стандартный HMAC
+        
+        # Вариант 1: HMAC SHA256 (стандартный способ)
+        signature_hmac = hmac.new(
             api_key.encode('utf-8'),
             sign_string.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
+        
+        # Вариант 2: SHA256 от строки + API ключ (на случай, если документация неточная)
+        sign_string_with_key = f"{sign_string}|{api_key}"
+        signature_sha256 = hashlib.sha256(sign_string_with_key.encode('utf-8')).hexdigest()
+        
+        # Используем HMAC вариант (стандартный)
+        signature = signature_hmac
         
         # Подробное логирование для отладки
         logger.info(f"🔐 Generating FreeKassa API signature:")
         logger.info(f"   Sorted keys: {sorted_keys}")
         logger.info(f"   Sign string (full): {sign_string}")
         logger.info(f"   API key length: {len(api_key)} chars")
-        logger.info(f"   Signature: {signature}")
+        logger.info(f"   API key (first 10 chars): {api_key[:10]}...")
+        logger.info(f"   Signature (HMAC): {signature}")
+        logger.info(f"   Signature (SHA256): {signature_sha256}")
+        logger.info(f"   Using: HMAC SHA256")
         
         return signature
 
