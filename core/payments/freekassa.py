@@ -6,6 +6,7 @@ from typing import Dict, Optional
 from decimal import Decimal
 import uuid
 import hashlib
+import hmac
 import logging
 import time
 import aiohttp
@@ -46,18 +47,42 @@ class FreeKassaProvider(PaymentProvider):
         
         logger.info(f"FreeKassaProvider initialized with merchant_id: {self.merchant_id}")
 
-    def _generate_api_signature(self, shop_id: str, nonce: int, api_key: str) -> str:
+    def _generate_api_signature(self, request_body: dict, api_key: str) -> str:
         """
         Генерация подписи для API запросов FreeKassa
         
-        Формула: md5(shopId:nonce:api_key)
-        ВАЖНО: shopId должен быть числом (без пробелов и лишних символов)
+        Согласно документации API v1:
+        1. Берем все ключи тела запроса
+        2. Сортируем их в алфавитном порядке
+        3. Берем их значения
+        4. Соединяем через символ |
+        5. Подмешиваем API_KEY
+        6. Получаем HMAC SHA256
+        
+        ВАЖНО: signature НЕ должен быть в request_body при генерации подписи!
         """
-        # Убеждаемся, что shop_id - это число (убираем пробелы)
-        shop_id_clean = str(shop_id).strip()
-        sign_string = f"{shop_id_clean}:{nonce}:{api_key}"
-        logger.debug(f"Generating signature with: shopId={shop_id_clean}, nonce={nonce}, api_key={api_key[:10]}...")
-        return hashlib.md5(sign_string.encode()).hexdigest()
+        # Создаем копию тела запроса без signature (если есть)
+        body_for_signature = {k: v for k, v in request_body.items() if k != "signature"}
+        
+        # Сортируем ключи в алфавитном порядке
+        sorted_keys = sorted(body_for_signature.keys())
+        
+        # Берем значения в отсортированном порядке и соединяем через |
+        values = [str(body_for_signature[key]) for key in sorted_keys]
+        sign_string = "|".join(values)
+        
+        # Добавляем API ключ
+        sign_string_with_key = f"{sign_string}|{api_key}"
+        
+        # Генерируем HMAC SHA256
+        signature = hmac.new(
+            api_key.encode('utf-8'),
+            sign_string_with_key.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        logger.debug(f"Generating signature: sorted_keys={sorted_keys}, sign_string={sign_string[:50]}..., signature={signature[:20]}...")
+        return signature
 
     async def verify_api_token(self) -> bool:
         """
@@ -136,15 +161,12 @@ class FreeKassaProvider(PaymentProvider):
             # Используем timestamp в миллисекундах для уникальности
             nonce = int(time.time() * 1000)
             
-            # Убеждаемся, что merchant_id - это число для подписи
+            # Убеждаемся, что merchant_id - это число
             try:
-                shop_id_for_signature = str(int(self.merchant_id)).strip()
+                shop_id_int = int(self.merchant_id)
+                shop_id_for_signature = str(shop_id_int)
             except ValueError:
                 raise ValueError(f"FREEKASSA_MERCHANT_ID must be a number, got: {self.merchant_id}")
-            
-            # Генерируем подпись для API запроса
-            signature = self._generate_api_signature(shop_id_for_signature, nonce, self.api_key)
-            logger.info(f"Generated signature: {signature[:20]}... (shopId={shop_id_for_signature}, nonce={nonce})")
             
             # Формируем email (реальный email или tgid@telegram.org)
             email = user_email if user_email else f"{user_id}@telegram.org"
@@ -164,23 +186,11 @@ class FreeKassaProvider(PaymentProvider):
             # Согласно документации: POST https://api.fk.life/v1/orders/create
             api_endpoint = f"{self.api_url}/orders/create"
             
-            # Параметры запроса (query parameters)
-            # shopId должен быть числом согласно документации API
-            # Используем уже проверенный shop_id_for_signature
-            query_params = {
-                "shopId": shop_id_for_signature,  # Передаем как строку (число в виде строки)
-                "nonce": str(nonce),
-                "signature": signature
-            }
-            
-            logger.info(f"Query params: shopId={query_params['shopId']}, nonce={query_params['nonce']}, signature={query_params['signature'][:20]}...")
-            
-            # Тело запроса (JSON)
-            # Согласно документации API, shopId, nonce и signature также должны быть в теле запроса
+            # Тело запроса БЕЗ signature (signature добавим после генерации)
+            # Согласно документации API, shopId, nonce должны быть в теле запроса
             request_body = {
-                "shopId": int(shop_id_for_signature),  # ID магазина (обязательно в теле запроса!)
+                "shopId": shop_id_int,  # ID магазина (обязательно в теле запроса!)
                 "nonce": nonce,  # Уникальный ID запроса (обязательно в теле запроса!)
-                "signature": signature,  # Подпись запроса (обязательно в теле запроса!)
                 "paymentId": str(order_id),  # Номер заказа в нашем магазине
                 "i": payment_method_code,  # Способ оплаты
                 "email": email,  # Email клиента
@@ -191,6 +201,22 @@ class FreeKassaProvider(PaymentProvider):
                 "success_url": success_url,  # URL для успешной оплаты
                 "fail_url": fail_url  # URL для неудачной оплаты
             }
+            
+            # Генерируем подпись из тела запроса (БЕЗ signature!)
+            signature = self._generate_api_signature(request_body, self.api_key)
+            logger.info(f"Generated signature: {signature[:20]}... (shopId={shop_id_int}, nonce={nonce})")
+            
+            # Теперь добавляем signature в тело запроса
+            request_body["signature"] = signature
+            
+            # Параметры запроса (query parameters) - для совместимости
+            query_params = {
+                "shopId": shop_id_for_signature,
+                "nonce": str(nonce),
+                "signature": signature
+            }
+            
+            logger.info(f"Query params: shopId={query_params['shopId']}, nonce={query_params['nonce']}, signature={query_params['signature'][:20]}...")
             
             # Логируем все параметры для отладки (без секретных ключей)
             logger.info(
