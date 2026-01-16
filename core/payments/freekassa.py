@@ -103,18 +103,28 @@ class FreeKassaProvider(PaymentProvider):
         sign_string_with_key = f"{sign_string}|{api_key}"
         signature_sha256 = hashlib.sha256(sign_string_with_key.encode('utf-8')).hexdigest()
         
-        # Используем HMAC вариант (стандартный)
-        signature = signature_hmac
+        # Пробуем использовать SHA256 вариант (возможно, документация неточная)
+        # Если не сработает, можно вернуться к HMAC
+        signature = signature_sha256
         
-        # Подробное логирование для отладки (используем ERROR для гарантированного вывода)
+        # Подробное логирование для отладки (используем print для гарантированного вывода)
+        print(f"🔐 Generating FreeKassa API signature:")
+        print(f"   Sorted keys: {sorted_keys}")
+        print(f"   Sign string (full): {sign_string}")
+        print(f"   API key length: {len(api_key)} chars")
+        print(f"   API key (first 10 chars): {api_key[:10]}...")
+        print(f"   Signature (HMAC): {signature_hmac}")
+        print(f"   Signature (SHA256): {signature_sha256}")
+        print(f"   Using: SHA256 (trying this first)")
+        
         logger.error(f"🔐 Generating FreeKassa API signature:")
         logger.error(f"   Sorted keys: {sorted_keys}")
         logger.error(f"   Sign string (full): {sign_string}")
         logger.error(f"   API key length: {len(api_key)} chars")
         logger.error(f"   API key (first 10 chars): {api_key[:10]}...")
-        logger.error(f"   Signature (HMAC): {signature}")
+        logger.error(f"   Signature (HMAC): {signature_hmac}")
         logger.error(f"   Signature (SHA256): {signature_sha256}")
-        logger.error(f"   Using: HMAC SHA256")
+        logger.error(f"   Using: SHA256 (trying this first)")
         
         return signature
 
