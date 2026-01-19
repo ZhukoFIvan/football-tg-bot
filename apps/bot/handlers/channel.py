@@ -9,6 +9,8 @@ import time
 import aiohttp
 from aiogram import Router, Bot
 from aiogram.types import Message
+from aiogram.filters import ChatTypeFilter
+from aiogram.enums import ChatType
 from sqlalchemy import select
 
 from core.db.session import AsyncSessionLocal
@@ -174,17 +176,25 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
                         logger.debug(f"Задача для поста {current_message_id} удалена из словаря")
 
 
-@router.channel_post()
+@router.channel_post(ChatTypeFilter(ChatType.CHANNEL))
 async def handle_channel_post(message: Message, bot: Bot):
     """
     Обработчик новых постов в канале
     Отправляет комментарий в группу обсуждений канала
     Обрабатывает только последний пост, отменяя обработку предыдущих
+    
+    ВАЖНО: Обрабатывает ТОЛЬКО посты из канала, не сообщения из группы обсуждений!
     """
     try:
-        # Проверяем, что это действительно пост в канале, а не сообщение в группе
-        if message.chat.type != "channel":
+        # СТРОГАЯ ПРОВЕРКА: убеждаемся, что это действительно канал
+        if message.chat.type != ChatType.CHANNEL:
             logger.debug(f"Пропускаем сообщение - это не канал: {message.chat.type}")
+            return
+        
+        # КРИТИЧЕСКИ ВАЖНО: Посты в канале НЕ имеют автора (from_user = None)
+        # Сообщения в группе обсуждений ВСЕГДА имеют автора (from_user != None)
+        if message.from_user is not None:
+            logger.debug(f"Пропускаем сообщение - есть автор (это сообщение из группы, а не пост из канала). Автор: {message.from_user.id}")
             return
         
         # Проверяем, что это не forwarded сообщение и не reply
@@ -192,7 +202,15 @@ async def handle_channel_post(message: Message, bot: Bot):
             logger.debug(f"Пропускаем сообщение - это forwarded или reply")
             return
         
-        logger.info(f"Получен пост в канале: {message.chat.id}, message_id: {message.message_id}, тип: {message.chat.type}")
+        # Логируем информацию о посте для отладки
+        logger.info(
+            f"✅ Получен ПОСТ из КАНАЛА: "
+            f"channel_id={message.chat.id}, "
+            f"message_id={message.message_id}, "
+            f"chat_type={message.chat.type}, "
+            f"from_user={message.from_user}, "
+            f"is_automatic_forward={getattr(message, 'is_automatic_forward', None)}"
+        )
         
         channel_id = message.chat.id
         current_message_id = message.message_id
