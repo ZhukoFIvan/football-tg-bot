@@ -30,6 +30,10 @@ _active_tasks: dict[int, asyncio.Task] = {}
 # Lock для синхронизации доступа к словарям
 _post_lock = asyncio.Lock()
 
+# Время запуска обработчика (для фильтрации старых постов)
+# Устанавливается при первом вызове обработчика
+_handler_start_time: float = None
+
 
 async def _process_post_comment(message: Message, bot: Bot, comment_text: str, linked_chat_id: int):
     """
@@ -191,6 +195,13 @@ async def handle_channel_post(message: Message, bot: Bot):
     
     ВАЖНО: Обрабатывает ТОЛЬКО посты из канала, не сообщения из группы обсуждений!
     """
+    global _handler_start_time
+    
+    # Устанавливаем время запуска при первом вызове
+    if _handler_start_time is None:
+        _handler_start_time = time.time()
+        logger.info(f"🕐 Время запуска обработчика установлено: {_handler_start_time:.1f}")
+    
     try:
         # СТРОГАЯ ПРОВЕРКА: убеждаемся, что это действительно канал
         if message.chat.type != ChatType.CHANNEL:
@@ -221,18 +232,49 @@ async def handle_channel_post(message: Message, bot: Bot):
         channel_id = message.chat.id
         current_message_id = message.message_id
         
-        # КРИТИЧЕСКИ ВАЖНО: Проверяем, что пост свежий (не старше 5 секунд)
-        # Это нужно, чтобы не обрабатывать старые посты, которые приходят при запуске бота
-        # Установлено 5 секунд - только самые свежие посты
-        current_time = time.time()
-        if message.date:
-            post_age = current_time - message.date.timestamp()
-            if post_age > 5:
-                logger.info(f"⏭️ Пропускаем старый пост {current_message_id}, возраст: {post_age:.1f} секунд (больше 5 секунд)")
-                return
-        else:
-            # Если нет даты, пропускаем (не должно быть, но на всякий случай)
+        # КРИТИЧЕСКИ ВАЖНО: Проверяем, что пост свежий и создан ПОСЛЕ запуска бота
+        if not message.date:
             logger.warning(f"⚠️ Пост {current_message_id} не имеет даты, пропускаем")
+            return
+        
+        # Получаем текущее время и время поста
+        current_time = time.time()
+        post_timestamp = message.date.timestamp()
+        post_age = current_time - post_timestamp
+        
+        # Логируем для отладки (ВСЕГДА, чтобы видеть что происходит)
+        logger.info(
+            f"⏰ Проверка возраста поста {current_message_id}: "
+            f"текущее время={current_time:.1f}, "
+            f"время поста={post_timestamp:.1f}, "
+            f"возраст={post_age:.1f} секунд, "
+            f"время запуска обработчика={_handler_start_time:.1f if _handler_start_time else 'не установлено'}"
+        )
+        
+        # КРИТИЧЕСКАЯ ПРОВЕРКА: Пост должен быть создан ПОСЛЕ запуска обработчика
+        # Это защищает от обработки старых постов при запуске бота
+        if _handler_start_time and post_timestamp < _handler_start_time:
+            logger.warning(
+                f"🚫 Пост {current_message_id} был создан ДО запуска бота! "
+                f"Время поста: {post_timestamp:.1f}, время запуска: {_handler_start_time:.1f}. "
+                f"Пропускаем!"
+            )
+            return
+        
+        # Если пост старше 5 секунд - пропускаем
+        if post_age > 5:
+            logger.warning(
+                f"⏭️ Пропускаем СТАРЫЙ пост {current_message_id}, "
+                f"возраст: {post_age:.1f} секунд ({post_age/60:.1f} минут) - больше 5 секунд!"
+            )
+            return
+        
+        # Дополнительная проверка: если пост старше 1 минуты - точно пропускаем (на случай проблем с временем)
+        if post_age > 60:
+            logger.error(
+                f"🚫 КРИТИЧЕСКОЕ: Пост {current_message_id} очень старый! "
+                f"Возраст: {post_age/60:.1f} минут. Пропускаем!"
+            )
             return
         
         # Отменяем предыдущую задачу для этого канала, если она существует

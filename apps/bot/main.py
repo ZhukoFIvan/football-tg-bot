@@ -61,8 +61,13 @@ async def main():
         except Exception as e:
             logger.warning(f"⚠️ Не удалось удалить webhook (возможно, его нет): {e}")
         
-        # Запуск polling
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        # Запуск polling с игнорированием старых обновлений
+        # drop_pending_updates=True уже установлен в delete_webhook выше
+        await dp.start_polling(
+            bot, 
+            allowed_updates=dp.resolve_used_update_types(),
+            drop_pending_updates=True  # Дополнительно игнорируем старые обновления
+        )
     finally:
         await bot.session.close()
 
