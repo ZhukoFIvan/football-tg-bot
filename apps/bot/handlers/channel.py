@@ -200,7 +200,7 @@ async def handle_channel_post(message: Message, bot: Bot):
     # Устанавливаем время запуска при первом вызове
     if _handler_start_time is None:
         _handler_start_time = time.time()
-        logger.info(f"🕐 Время запуска обработчика установлено: {_handler_start_time:.1f}")
+        logger.info(f"🕐 Время запуска обработчика установлено: {_handler_start_time}")
     
     try:
         # СТРОГАЯ ПРОВЕРКА: убеждаемся, что это действительно канал
@@ -243,12 +243,17 @@ async def handle_channel_post(message: Message, bot: Bot):
         post_age = current_time - post_timestamp
         
         # Логируем для отладки (ВСЕГДА, чтобы видеть что происходит)
+        if _handler_start_time:
+            handler_start_str = str(_handler_start_time)
+        else:
+            handler_start_str = "не установлено"
+        
         logger.info(
             f"⏰ Проверка возраста поста {current_message_id}: "
             f"текущее время={current_time:.1f}, "
             f"время поста={post_timestamp:.1f}, "
             f"возраст={post_age:.1f} секунд, "
-            f"время запуска обработчика={_handler_start_time:.1f if _handler_start_time else 'не установлено'}"
+            f"время запуска обработчика={handler_start_str}"
         )
         
         # КРИТИЧЕСКАЯ ПРОВЕРКА: Пост должен быть создан ПОСЛЕ запуска обработчика
@@ -256,7 +261,7 @@ async def handle_channel_post(message: Message, bot: Bot):
         if _handler_start_time and post_timestamp < _handler_start_time:
             logger.warning(
                 f"🚫 Пост {current_message_id} был создан ДО запуска бота! "
-                f"Время поста: {post_timestamp:.1f}, время запуска: {_handler_start_time:.1f}. "
+                f"Время поста: {post_timestamp}, время запуска: {_handler_start_time}. "
                 f"Пропускаем!"
             )
             return
