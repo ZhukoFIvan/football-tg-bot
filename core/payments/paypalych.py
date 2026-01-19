@@ -113,12 +113,28 @@ class PaypalychProvider(PaymentProvider):
                 # ВАЖНО: result_url - URL для postback уведомлений от Paypalych
                 from core.config import settings
                 result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/paypalych"
-                # Получаем username бота из настроек (без хардкода!)
+                # Получаем username бота из настроек или через API Telegram
                 bot_username = getattr(settings, 'BOT_USERNAME', '').strip()
                 if not bot_username:
+                    # Пробуем получить username через API Telegram
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            api_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/getMe"
+                            async with session.get(api_url) as response:
+                                if response.status == 200:
+                                    data = await response.json()
+                                    if data.get("ok") and "result" in data:
+                                        bot_username = data["result"].get("username", "")
+                                        if bot_username:
+                                            settings.BOT_USERNAME = bot_username
+                                            logger.info(f"✅ BOT_USERNAME получен через API: @{bot_username}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Не удалось получить BOT_USERNAME через API: {e}")
+                
+                if not bot_username:
                     raise ValueError(
-                        "BOT_USERNAME не установлен в .env файле. "
-                        "Установите BOT_USERNAME=ваш_бот_username (например: Romlx_store_bot или Romix_store_bot)"
+                        "BOT_USERNAME не установлен в .env файле и не может быть получен через API. "
+                        "Установите BOT_USERNAME=ваш_бот_username в .env файле (например: noonyashop_bot)"
                     )
                 # Frontend страницы результатов (не API, а Next.js)
                 success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}&bot_username={bot_username}"

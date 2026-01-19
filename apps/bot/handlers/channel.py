@@ -9,7 +9,6 @@ import time
 import aiohttp
 from aiogram import Router, Bot
 from aiogram.types import Message
-from aiogram.filters import ChatTypeFilter
 from aiogram.enums import ChatType
 from sqlalchemy import select
 
@@ -176,7 +175,7 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
                         logger.debug(f"Задача для поста {current_message_id} удалена из словаря")
 
 
-@router.channel_post(ChatTypeFilter(ChatType.CHANNEL))
+@router.channel_post()
 async def handle_channel_post(message: Message, bot: Bot):
     """
     Обработчик новых постов в канале
