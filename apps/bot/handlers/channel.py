@@ -43,10 +43,10 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
         logger.info(f"Текст комментария: {comment_text[:50]}...")
         logger.info(f"ID поста в канале: {current_message_id}")
         
-        # Сначала ждем 5 секунд, чтобы "собрать" все посты, которые могут прийти подряд
+        # Сначала ждем 2 секунды, чтобы "собрать" все посты, которые могут прийти подряд
         # Это нужно, чтобы обработать только последний пост из серии
-        logger.info("Ожидание 5 секунд для сбора всех постов...")
-        for _ in range(10):  # 10 раз по 0.5 секунды = 5 секунд
+        logger.info("Ожидание 2 секунд для сбора всех постов...")
+        for _ in range(4):  # 4 раза по 0.5 секунды = 2 секунды
             await asyncio.sleep(0.5)
             async with _post_lock:
                 if channel_id in _last_post_ids:
@@ -57,16 +57,15 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
                         return
         
         # Дополнительная задержка, чтобы Telegram успел создать сообщение в группе обсуждений
-        logger.info("Ожидание 3 секунд перед отправкой комментария...")
-        for _ in range(6):  # 6 раз по 0.5 секунды = 3 секунды
-            await asyncio.sleep(0.5)
-            async with _post_lock:
-                if channel_id in _last_post_ids:
-                    last_message_id = _last_post_ids[channel_id]
-                    # Если текущий пост НЕ является последним - отменяем обработку
-                    if current_message_id != last_message_id:
-                        logger.info(f"❌ Пост {current_message_id} НЕ является последним! Последний пост: {last_message_id}. Отменяю обработку.")
-                        return
+        logger.info("Ожидание 1 секунды перед отправкой комментария...")
+        await asyncio.sleep(1)
+        async with _post_lock:
+            if channel_id in _last_post_ids:
+                last_message_id = _last_post_ids[channel_id]
+                # Если текущий пост НЕ является последним - отменяем обработку
+                if current_message_id != last_message_id:
+                    logger.info(f"❌ Пост {current_message_id} НЕ является последним! Последний пост: {last_message_id}. Отменяю обработку.")
+                    return
         
         # Проверяем еще раз перед отправкой (на случай, если за время задержки пришел новый пост)
         async with _post_lock:
@@ -81,7 +80,15 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
         # message_id поста в канале совпадает с message_id соответствующего сообщения в группе обсуждений
         # Это создаст комментарий под постом, а не просто сообщение в чате
         try:
-            logger.info(f"Отправляю комментарий в группу {linked_chat_id} с reply_to_message_id={current_message_id}")
+            logger.info(f"📤 Отправляю комментарий в группу {linked_chat_id} с reply_to_message_id={current_message_id}")
+            
+            # Проверяем еще раз перед отправкой, что это все еще актуальный пост
+            async with _post_lock:
+                if channel_id in _last_post_ids:
+                    last_message_id = _last_post_ids[channel_id]
+                    if current_message_id != last_message_id:
+                        logger.info(f"❌ Пост {current_message_id} НЕ является последним перед отправкой! Последний пост: {last_message_id}. Отменяю отправку.")
+                        return
             
             # Используем reply_to_message_id для создания комментария под постом
             # Это правильный способ оставлять комментарии к постам в канале
@@ -91,7 +98,7 @@ async def _process_post_comment(message: Message, bot: Bot, comment_text: str, l
                 reply_to_message_id=current_message_id,  # ID поста в канале (совпадает с ID сообщения в группе)
                 parse_mode="HTML"
             )
-            logger.info(f"✅ Комментарий успешно отправлен под постом в канале!")
+            logger.info(f"✅ Комментарий успешно отправлен под постом {current_message_id} в канале!")
                         
         except Exception as e:
             error_msg = str(e)
@@ -214,15 +221,19 @@ async def handle_channel_post(message: Message, bot: Bot):
         channel_id = message.chat.id
         current_message_id = message.message_id
         
-        # Проверяем, что пост свежий (не старше 10 секунд)
+        # КРИТИЧЕСКИ ВАЖНО: Проверяем, что пост свежий (не старше 5 секунд)
         # Это нужно, чтобы не обрабатывать старые посты, которые приходят при запуске бота
-        # Уменьшено до 10 секунд, чтобы обрабатывать только действительно свежие посты
+        # Установлено 5 секунд - только самые свежие посты
         current_time = time.time()
         if message.date:
             post_age = current_time - message.date.timestamp()
-            if post_age > 10:
-                logger.info(f"⏭️ Пропускаем старый пост {current_message_id}, возраст: {post_age:.1f} секунд (больше 10 секунд)")
+            if post_age > 5:
+                logger.info(f"⏭️ Пропускаем старый пост {current_message_id}, возраст: {post_age:.1f} секунд (больше 5 секунд)")
                 return
+        else:
+            # Если нет даты, пропускаем (не должно быть, но на всякий случай)
+            logger.warning(f"⚠️ Пост {current_message_id} не имеет даты, пропускаем")
+            return
         
         # Отменяем предыдущую задачу для этого канала, если она существует
         old_task = None
