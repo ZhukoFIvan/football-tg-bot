@@ -214,13 +214,14 @@ async def handle_channel_post(message: Message, bot: Bot):
         channel_id = message.chat.id
         current_message_id = message.message_id
         
-        # Проверяем, что пост свежий (не старше 30 секунд)
-        # Это нужно, чтобы не обрабатывать старые посты, которые приходят с задержкой из-за polling
+        # Проверяем, что пост свежий (не старше 10 секунд)
+        # Это нужно, чтобы не обрабатывать старые посты, которые приходят при запуске бота
+        # Уменьшено до 10 секунд, чтобы обрабатывать только действительно свежие посты
         current_time = time.time()
         if message.date:
             post_age = current_time - message.date.timestamp()
-            if post_age > 30:
-                logger.info(f"Пропускаем старый пост {current_message_id}, возраст: {post_age:.1f} секунд")
+            if post_age > 10:
+                logger.info(f"⏭️ Пропускаем старый пост {current_message_id}, возраст: {post_age:.1f} секунд (больше 10 секунд)")
                 return
         
         # Отменяем предыдущую задачу для этого канала, если она существует

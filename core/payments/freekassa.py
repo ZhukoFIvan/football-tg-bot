@@ -227,16 +227,14 @@ class FreeKassaProvider(PaymentProvider):
             # Формируем IP (IP клиента или сервера, можно передать IP сервера)
             ip = user_ip if user_ip else "127.0.0.1"  # В реальности нужно получить IP клиента
             
-            # ВАЖНО: result_url - URL для webhook уведомлений от FreeKassa
-            result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/freekassa"
-            # Получаем username бота из настроек или через API Telegram
+            # Получаем username бота из настроек или через API Telegram ДО создания основной сессии
             bot_username = getattr(settings, 'BOT_USERNAME', '').strip()
             if not bot_username:
                 # Пробуем получить username через API Telegram
                 try:
-                    async with aiohttp.ClientSession() as session:
+                    async with aiohttp.ClientSession() as temp_session:
                         api_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/getMe"
-                        async with session.get(api_url) as response:
+                        async with temp_session.get(api_url) as response:
                             if response.status == 200:
                                 data = await response.json()
                                 if data.get("ok") and "result" in data:
@@ -252,6 +250,9 @@ class FreeKassaProvider(PaymentProvider):
                     "BOT_USERNAME не установлен в .env файле и не может быть получен через API. "
                     "Установите BOT_USERNAME=ваш_бот_username в .env файле (например: noonyashop_bot)"
                 )
+            
+            # ВАЖНО: result_url - URL для webhook уведомлений от FreeKassa
+            result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/freekassa"
             # Frontend страницы результатов (не API, а Next.js)
             success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}&bot_username={bot_username}"
             fail_url = f"{settings.FRONTEND_URL}/payments/failed?order_id={order_id}&bot_username={bot_username}"

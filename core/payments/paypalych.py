@@ -6,6 +6,7 @@ from decimal import Decimal
 import uuid
 import aiohttp
 import base64
+import json
 import logging
 
 from core.payments.base import PaymentProvider
@@ -97,6 +98,31 @@ class PaypalychProvider(PaymentProvider):
                 "Expected format: merchant_id|api_key"
             )
         
+        # Получаем username бота из настроек или через API Telegram ДО создания основной сессии
+        from core.config import settings
+        bot_username = getattr(settings, 'BOT_USERNAME', '').strip()
+        if not bot_username:
+            # Пробуем получить username через API Telegram
+            try:
+                async with aiohttp.ClientSession() as temp_session:
+                    api_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/getMe"
+                    async with temp_session.get(api_url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if data.get("ok") and "result" in data:
+                                bot_username = data["result"].get("username", "")
+                                if bot_username:
+                                    settings.BOT_USERNAME = bot_username
+                                    logger.info(f"✅ BOT_USERNAME получен через API: @{bot_username}")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось получить BOT_USERNAME через API: {e}")
+        
+        if not bot_username:
+            raise ValueError(
+                "BOT_USERNAME не установлен в .env файле и не может быть получен через API. "
+                "Установите BOT_USERNAME=ваш_бот_username в .env файле (например: noonyashop_bot)"
+            )
+        
         try:
             # Реальный запрос к API Paypalych согласно документации
             # Endpoint: /api/v1/bill/create
@@ -111,31 +137,8 @@ class PaypalychProvider(PaymentProvider):
                 # Но в form-data кавычки не нужны, aiohttp сам обработает
                 
                 # ВАЖНО: result_url - URL для postback уведомлений от Paypalych
-                from core.config import settings
                 result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/paypalych"
-                # Получаем username бота из настроек или через API Telegram
-                bot_username = getattr(settings, 'BOT_USERNAME', '').strip()
-                if not bot_username:
-                    # Пробуем получить username через API Telegram
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            api_url = f"https://api.telegram.org/bot{settings.BOT_TOKEN}/getMe"
-                            async with session.get(api_url) as response:
-                                if response.status == 200:
-                                    data = await response.json()
-                                    if data.get("ok") and "result" in data:
-                                        bot_username = data["result"].get("username", "")
-                                        if bot_username:
-                                            settings.BOT_USERNAME = bot_username
-                                            logger.info(f"✅ BOT_USERNAME получен через API: @{bot_username}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Не удалось получить BOT_USERNAME через API: {e}")
                 
-                if not bot_username:
-                    raise ValueError(
-                        "BOT_USERNAME не установлен в .env файле и не может быть получен через API. "
-                        "Установите BOT_USERNAME=ваш_бот_username в .env файле (например: noonyashop_bot)"
-                    )
                 # Frontend страницы результатов (не API, а Next.js)
                 success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}&bot_username={bot_username}"
                 fail_url = f"{settings.FRONTEND_URL}/payments/failed?order_id={order_id}&bot_username={bot_username}"
@@ -180,18 +183,30 @@ class PaypalychProvider(PaymentProvider):
                     data=data_form,
                     timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
+                    # Получаем текст ответа ДО выхода из блока
+                    response_text = await response.text()
+                    
                     if response.status == 200 or response.status == 201:
-                        result = await response.json()
-                        logger.info(f"Paypalych payment created: {result}")
+                        try:
+                            # Парсим JSON из уже прочитанного текста
+                            result = json.loads(response_text)
+                        except Exception as json_error:
+                            # Если не JSON, пробуем распарсить как текст
+                            logger.warning(f"Response is not JSON, trying to parse as text: {json_error}")
+                            result = {"raw_response": response_text}
                         
-                        # Проверяем успешность
-                        if result.get("success") != "true" and result.get("success") is not True:
-                            error_msg = result.get("message", "Unknown error")
+                        logger.info(f"Paypalych API response: {result}")
+                        
+                        # Проверяем успешность (Paypalych может возвращать success=true или status=success)
+                        success = result.get("success") == "true" or result.get("success") is True or result.get("status") == "success"
+                        
+                        if not success:
+                            error_msg = result.get("message") or result.get("error") or response_text
                             raise Exception(f"Paypalych API returned error: {error_msg}")
                         
                         # Используем link_page_url для перенаправления пользователя
-                        payment_url = result.get("link_page_url") or result.get("link_url")
-                        payment_id = result.get("bill_id")
+                        payment_url = result.get("link_page_url") or result.get("link_url") or result.get("url")
+                        payment_id = result.get("bill_id") or result.get("id") or result.get("payment_id")
                         
                         if not payment_url:
                             raise ValueError(f"No payment_url in response: {result}")
@@ -199,19 +214,19 @@ class PaypalychProvider(PaymentProvider):
                             raise ValueError(f"No bill_id in response: {result}")
                         
                         return {
-                            "payment_id": payment_id,
+                            "payment_id": str(payment_id),
                             "payment_url": payment_url,
                             "status": "pending"
                         }
                     else:
-                        error_text = await response.text()
+                        # Ошибка от API
                         logger.error(
-                            f"Paypalych API error {response.status}: {error_text}. "
+                            f"Paypalych API error {response.status}: {response_text}. "
                             f"Request data: shop_id={self.shop_id}, amount={amount}, order_id={order_id}"
                         )
                         
                         # Если ошибка авторизации (401 или Unauthenticated)
-                        if response.status == 401 or "Unauthenticated" in error_text or "unauthorized" in error_text.lower():
+                        if response.status == 401 or "Unauthenticated" in response_text or "unauthorized" in response_text.lower():
                             raise Exception(
                                 f"❌ Paypalych API: Ошибка авторизации (токен неверный).\n\n"
                                 f"📋 ЧТО ПРОВЕРИТЬ:\n\n"
@@ -221,11 +236,11 @@ class PaypalychProvider(PaymentProvider):
                                 f"   • Проверьте, что токен скопирован полностью, без пробелов\n\n"
                                 f"2️⃣ Создайте новый токен в личном кабинете Paypalych\n\n"
                                 f"3️⃣ Убедитесь, что токен активен и имеет права на создание платежей\n\n"
-                                f"Ошибка от API: {error_text}"
+                                f"Ошибка от API: {response_text}"
                             )
                         
                         # Если ошибка невалидной суммы
-                        if "invalid_amount" in error_text.lower():
+                        if "invalid_amount" in response_text.lower() or "amount" in response_text.lower():
                             raise Exception(
                                 f"❌ Paypalych API: Неверная сумма платежа ({amount} RUB).\n\n"
                                 f"📋 ВОЗМОЖНЫЕ ПРИЧИНЫ:\n\n"
@@ -236,13 +251,13 @@ class PaypalychProvider(PaymentProvider):
                                 f"2️⃣ Проверьте настройки магазина в личном кабинете:\n"
                                 f"   • Минимальная/максимальная сумма платежа\n"
                                 f"   • Ограничения по суммам\n\n"
-                                f"Ошибка от API: {error_text}"
+                                f"Ошибка от API: {response_text}"
                             )
                         
                         # Если shop_id не найден, даем понятное сообщение
-                        if response.status == 422 and "shop_not_found" in error_text:
+                        if response.status == 422 or "shop_not_found" in response_text.lower() or "shop" in response_text.lower():
                             raise Exception(
-                                f"❌ Paypalych API: shop_id '{self.shop_id}' не найден.\n\n"
+                                f"❌ Paypalych API: shop_id '{self.shop_id}' не найден или неверный.\n\n"
                                 f"📋 ЧТО НУЖНО СДЕЛАТЬ:\n\n"
                                 f"1️⃣ Найдите ПРАВИЛЬНЫЙ shop_id в личном кабинете Paypalych:\n"
                                 f"   • Откройте https://pally.info (или ваш кабинет)\n"
@@ -254,10 +269,10 @@ class PaypalychProvider(PaymentProvider):
                                 f"3️⃣ Перезапустите сервер:\n"
                                 f"   docker-compose restart tg_shop_api\n\n"
                                 f"💡 ВАЖНО: В документации shop_id выглядит как 'G1vrEyX0LR', а не как число!\n\n"
-                                f"Ошибка от API: {error_text}"
+                                f"Ошибка от API: {response_text}"
                             )
                         
-                        raise Exception(f"Paypalych API error {response.status}: {error_text}")
+                        raise Exception(f"Paypalych API error {response.status}: {response_text}")
                         
         except Exception as e:
             logger.error(f"Error creating Paypalych payment: {e}", exc_info=True)
