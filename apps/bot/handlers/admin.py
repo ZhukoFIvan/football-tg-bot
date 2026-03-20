@@ -3,12 +3,14 @@
 """
 import asyncio
 import logging
+from contextlib import suppress
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, insert, update
+from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest
 
 from apps.bot.keyboards import get_admin_menu_keyboard, get_broadcast_cancel_keyboard, get_channel_text_cancel_keyboard
 from core.config import settings
@@ -17,6 +19,11 @@ from core.db.models import User, SiteSettings
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+# Параметры рассылки: умеренная параллельность + ограничение отправок в секунду.
+# Это ускоряет массовую отправку, но не перегружает Telegram API.
+BROADCAST_WORKERS = 20
+BROADCAST_MESSAGES_PER_SECOND = 25
 
 
 class BroadcastStates(StatesGroup):
@@ -155,10 +162,10 @@ async def process_broadcast_button_text(message: Message, state: FSMContext, bot
     async with AsyncSessionLocal() as session:
         try:
             result = await session.execute(
-                select(User).where(User.is_banned == False)
+                select(User.telegram_id).where(User.is_banned == False)
             )
-            users = result.scalars().all()
-            total_users = len(users)
+            telegram_ids = result.scalars().all()
+            total_users = len(telegram_ids)
 
             if total_users == 0:
                 await message.answer(
@@ -177,32 +184,87 @@ async def process_broadcast_button_text(message: Message, state: FSMContext, bot
                 "<i>Это может занять некоторое время.</i>"
             )
 
-            for user in users:
+            queue: asyncio.Queue[int] = asyncio.Queue()
+            for telegram_id in telegram_ids:
+                await queue.put(telegram_id)
+
+            # Глобальный rate limit для всех воркеров вместе.
+            rate_limit_lock = asyncio.Lock()
+            min_send_interval = 1 / BROADCAST_MESSAGES_PER_SECOND
+            last_send_ts = 0.0
+
+            sent_count_lock = asyncio.Lock()
+
+            async def send_to_user(telegram_id: int) -> bool:
+                nonlocal last_send_ts
                 try:
-                    # Если есть фото, отправляем с фото
-                    if broadcast_photo:
-                        await bot.send_photo(
-                            chat_id=user.telegram_id,
-                            photo=broadcast_photo,
-                            caption=broadcast_text,
-                            reply_markup=keyboard,
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await bot.send_message(
-                            chat_id=user.telegram_id,
-                            text=broadcast_text,
-                            reply_markup=keyboard,
-                            parse_mode="HTML"
-                        )
-                    sent_count += 1
-                    # Небольшая задержка, чтобы не превысить лимиты Telegram API
-                    await asyncio.sleep(0.05)  # 50ms между сообщениями
+                    for attempt in range(3):
+                        try:
+                            async with rate_limit_lock:
+                                loop_now = asyncio.get_running_loop().time()
+                                wait_time = max(0.0, min_send_interval - (loop_now - last_send_ts))
+                                if wait_time > 0:
+                                    await asyncio.sleep(wait_time)
+                                last_send_ts = asyncio.get_running_loop().time()
+
+                            if broadcast_photo:
+                                await bot.send_photo(
+                                    chat_id=telegram_id,
+                                    photo=broadcast_photo,
+                                    caption=broadcast_text,
+                                    reply_markup=keyboard,
+                                    parse_mode="HTML"
+                                )
+                            else:
+                                await bot.send_message(
+                                    chat_id=telegram_id,
+                                    text=broadcast_text,
+                                    reply_markup=keyboard,
+                                    parse_mode="HTML"
+                                )
+                            return True
+                        except TelegramRetryAfter as e:
+                            retry_after = max(0.0, float(e.retry_after))
+                            logger.warning(
+                                f"Rate limit на пользователе {telegram_id}, ждём {retry_after:.2f}s (попытка {attempt + 1}/3)"
+                            )
+                            await asyncio.sleep(retry_after + 0.1)
+                        except (TelegramForbiddenError, TelegramBadRequest) as e:
+                            logger.info(f"Не удалось отправить пользователю {telegram_id}: {e}")
+                            return False
+                    return False
                 except Exception as e:
-                    logger.error(f"Ошибка при отправке сообщения пользователю {user.telegram_id}: {e}")
-                    failed_count += 1
-                    # Задержка даже при ошибке, чтобы не спамить API
-                    await asyncio.sleep(0.05)
+                    logger.error(f"Ошибка при отправке сообщения пользователю {telegram_id}: {e}")
+                    return False
+
+            async def worker() -> None:
+                nonlocal sent_count, failed_count
+                while True:
+                    try:
+                        telegram_id = await queue.get()
+                    except asyncio.CancelledError:
+                        return
+
+                    try:
+                        success = await send_to_user(telegram_id)
+                        async with sent_count_lock:
+                            if success:
+                                sent_count += 1
+                            else:
+                                failed_count += 1
+                    finally:
+                        queue.task_done()
+
+            workers_count = min(BROADCAST_WORKERS, total_users)
+            workers = [asyncio.create_task(worker()) for _ in range(workers_count)]
+
+            await queue.join()
+
+            for w in workers:
+                w.cancel()
+            for w in workers:
+                with suppress(asyncio.CancelledError):
+                    await w
 
             await message.answer(
                 f"✅ <b>Рассылка завершена!</b>\n\n"
