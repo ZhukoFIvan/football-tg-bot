@@ -1,14 +1,35 @@
 """
-Утилиты для авторизации через Telegram WebApp initData и JWT
+Утилиты для авторизации через Telegram WebApp initData, Telegram Login Widget, JWT и пароли
 """
 import hashlib
 import hmac
 import jwt
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from urllib.parse import parse_qs
 from core.config import settings
 
+import bcrypt as _bcrypt_lib
+
+
+# ---------------------------------------------------------------------------
+# Passwords
+# ---------------------------------------------------------------------------
+
+def hash_password(password: str) -> str:
+    """Хешировать пароль через bcrypt"""
+    return _bcrypt_lib.hashpw(password.encode(), _bcrypt_lib.gensalt()).decode()
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    """Проверить пароль"""
+    return _bcrypt_lib.checkpw(plain.encode(), hashed.encode())
+
+
+# ---------------------------------------------------------------------------
+# Telegram WebApp initData (Mini App)
+# ---------------------------------------------------------------------------
 
 def verify_telegram_webapp_data(init_data: str) -> Optional[Dict]:
     """
@@ -72,16 +93,66 @@ def verify_telegram_webapp_data(init_data: str) -> Optional[Dict]:
         return None
 
 
-def create_jwt_token(telegram_id: int, user_id: int) -> str:
+# ---------------------------------------------------------------------------
+# Telegram Login Widget (сайт)
+# ---------------------------------------------------------------------------
+
+def verify_telegram_widget_data(data: Dict) -> bool:
     """
-    Создание JWT токена для пользователя
+    Проверка данных от Telegram Login Widget (виджет на сайте, не Mini App).
+
+    Алгоритм отличается от WebApp:
+    - secret_key = SHA256(BOT_TOKEN) — без "WebAppData"
+    - auth_date не должен быть старше 24 часов
     """
-    payload = {
-        "telegram_id": telegram_id,
+    try:
+        received_hash = data.get("hash")
+        if not received_hash:
+            return False
+
+        # Проверяем свежесть auth_date (не старше 24 часов)
+        auth_date = int(data.get("auth_date", 0))
+        if time.time() - auth_date > 86400:
+            return False
+
+        # Формируем data_check_string (все поля кроме hash, сортировка по ключу)
+        check_items = []
+        for key in sorted(data.keys()):
+            if key == "hash":
+                continue
+            check_items.append(f"{key}={data[key]}")
+        data_check_string = "\n".join(check_items)
+
+        # secret_key = SHA256(BOT_TOKEN)
+        secret_key = hashlib.sha256(settings.TG_WEBAPP_BOT_TOKEN.encode()).digest()
+
+        calculated_hash = hmac.new(
+            key=secret_key,
+            msg=data_check_string.encode(),
+            digestmod=hashlib.sha256
+        ).hexdigest()
+
+        return calculated_hash == received_hash
+    except Exception as e:
+        print(f"Error verifying Telegram widget data: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# JWT
+# ---------------------------------------------------------------------------
+
+def create_jwt_token(user_id: int, telegram_id: Optional[int] = None) -> str:
+    """
+    Создание JWT токена. telegram_id опционален (веб-пользователи без TG).
+    """
+    payload: Dict = {
         "user_id": user_id,
         "exp": datetime.utcnow() + timedelta(hours=settings.JWT_EXPIRATION_HOURS),
         "iat": datetime.utcnow(),
     }
+    if telegram_id is not None:
+        payload["telegram_id"] = telegram_id
 
     token = jwt.encode(
         payload,

@@ -1,6 +1,7 @@
 """
 FastAPI приложение - REST API для Telegram Mini App
 """
+import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -8,7 +9,10 @@ from pathlib import Path
 from core.config import settings
 
 # Импорт роутеров
-from apps.api.routes import health, public, auth, admin, stats, public_banners, cart, orders, bonus, admin_bonus, admin_cleanup, reviews, promo_codes, admin_reviews, payments
+from apps.api.routes import health, public, auth, admin, stats, public_banners, cart, orders, bonus, admin_bonus, admin_cleanup, reviews, promo_codes, admin_reviews, payments, chat
+
+# Socket.IO сервер
+from apps.socket.server import sio
 
 # Создание приложения
 app = FastAPI(
@@ -56,6 +60,7 @@ app.include_router(admin_reviews.router, prefix="/api/admin",
 app.include_router(reviews.router, prefix="/api", tags=["Reviews"])
 app.include_router(promo_codes.router, prefix="/api", tags=["Promo Codes"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
+app.include_router(chat.router, prefix="/api/chats", tags=["Chat"])
 
 
 @app.on_event("startup")
@@ -84,10 +89,15 @@ async def shutdown_event():
     print("🛑 API Server shutting down...")
 
 
+# Оборачиваем FastAPI в Socket.IO ASGI — всё доступно на одном порту
+# WebSocket подключение: ws://host/socket.io/
+combined_app = socketio.ASGIApp(sio, other_asgi_app=app)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        "apps.api.main:combined_app",
         host=settings.API_HOST,
         port=settings.API_PORT,
         reload=settings.DEBUG,

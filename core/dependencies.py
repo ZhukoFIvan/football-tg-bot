@@ -63,9 +63,13 @@ async def get_admin_user(
     if current_user.is_admin:
         return current_user
 
-    # Проверяем наличие в списке владельцев
-    if current_user.telegram_id in settings.owner_ids:
-        # Автоматически устанавливаем флаг is_admin если пользователь в OWNER_TG_IDS
+    # Проверяем по Telegram ID
+    if current_user.telegram_id and current_user.telegram_id in settings.owner_ids:
+        current_user.is_admin = True
+        return current_user
+
+    # Проверяем по email (для веб-пользователей без TG)
+    if current_user.email and current_user.email.lower() in settings.owner_emails:
         current_user.is_admin = True
         return current_user
 

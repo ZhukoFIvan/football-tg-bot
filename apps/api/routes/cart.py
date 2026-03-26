@@ -652,3 +652,87 @@ async def create_payment(
         amount=final_amount,
         status=payment_data["status"]
     )
+
+
+@router.post("/mock-checkout", response_model=PaymentResponse)
+async def mock_checkout(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Тестовый чекаут — создаёт заказ и сразу помечает оплаченным (для тестирования чата)"""
+    from apps.api.routes.payments import update_payment_status
+
+    result = await db.execute(
+        select(Cart)
+        .where(Cart.user_id == current_user.id)
+        .options(selectinload(Cart.items).selectinload(CartItem.product))
+    )
+    cart = result.scalar_one_or_none()
+    if not cart or not cart.items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+
+    order_items_data = []
+    total_amount = Decimal(0)
+    for cart_item in cart.items:
+        product = cart_item.product
+        if not product or not product.is_active:
+            continue
+        total_amount += product.price * cart_item.quantity
+        order_items_data.append({
+            "product_id": product.id,
+            "product_title": product.title,
+            "quantity": cart_item.quantity,
+            "price": product.price,
+        })
+
+    if not order_items_data:
+        raise HTTPException(status_code=400, detail="No valid items in cart")
+
+    order = Order(
+        user_id=current_user.id,
+        status="pending",
+        total_amount=total_amount,
+        final_amount=total_amount,
+        currency="RUB",
+        account_type="EA",
+        account_email="mock@test.local",
+        account_name="MockUser",
+    )
+    db.add(order)
+    await db.flush()
+
+    for item_data in order_items_data:
+        db.add(OrderItem(order_id=order.id, **item_data))
+
+    for cart_item in cart.items:
+        cart_item.product.stock_count -= cart_item.quantity
+        await db.delete(cart_item)
+
+    await db.commit()
+    await db.refresh(order)
+
+    payment = Payment(
+        order_id=order.id,
+        user_id=current_user.id,
+        payment_id=f"mock_{order.id}",
+        provider="mock",
+        payment_method="mock",
+        amount=total_amount,
+        currency="RUB",
+        status="pending",
+        payment_url=f"/payments/success?order_id={order.id}",
+        description=f"Mock payment for order #{order.id}",
+    )
+    db.add(payment)
+    await db.commit()
+    await db.refresh(payment)
+
+    await update_payment_status(payment, "success", db, paid_at=datetime.utcnow())
+
+    return PaymentResponse(
+        payment_id=f"mock_{order.id}",
+        payment_url=f"/payments/success?order_id={order.id}",
+        order_id=order.id,
+        amount=total_amount,
+        status="success",
+    )

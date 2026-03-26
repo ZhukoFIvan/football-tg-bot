@@ -15,14 +15,20 @@ from core.db.base import Base
 
 
 class User(Base):
-    """Пользователи Telegram"""
+    """Пользователи (Telegram или web)"""
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(BigInteger, unique=True, nullable=False, index=True)
+    telegram_id = Column(BigInteger, unique=True, nullable=True, index=True)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)
+
+    # Web auth fields
+    email = Column(String(255), unique=True, nullable=True, index=True)
+    password_hash = Column(String(255), nullable=True)
+    display_name = Column(String(255), nullable=True)  # отображаемое имя для веб-пользователей
+
     is_banned = Column(Boolean, default=False, nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -312,6 +318,47 @@ class PromoCode(Base):
 
     # Relationships
     orders = relationship("Order", back_populates="promo_code")
+
+
+class Chat(Base):
+    """Чат по заказу — один заказ = один чат"""
+    __tablename__ = "chats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"),
+                      nullable=False, unique=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    status = Column(String(20), default="open", nullable=False)  # open | resolved | closed
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    order = relationship("Order")
+    user = relationship("User")
+    messages = relationship("ChatMessage", back_populates="chat",
+                            cascade="all, delete-orphan",
+                            order_by="ChatMessage.created_at")
+
+
+class ChatMessage(Base):
+    """Сообщение в чате"""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(Integer, ForeignKey("chats.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"),
+                       nullable=True)   # NULL = системное сообщение
+    sender_type = Column(String(10), nullable=False)  # user | admin | system
+    content = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    chat = relationship("Chat", back_populates="messages")
+    sender = relationship("User", foreign_keys=[sender_id])
 
 
 class Payment(Base):

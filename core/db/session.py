@@ -24,6 +24,10 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+# Алиас для использования вне FastAPI (например, в Socket.IO handlers)
+async_session_factory = AsyncSessionLocal
+
+
 async def get_db() -> AsyncSession:
     """Dependency для получения DB сессии в FastAPI"""
     async with AsyncSessionLocal() as session:

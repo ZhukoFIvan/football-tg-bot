@@ -12,7 +12,7 @@ from decimal import Decimal
 from datetime import datetime
 
 from core.db.session import get_db
-from core.db.models import Payment, Order, User, OrderItem, BonusTransaction
+from core.db.models import Payment, Order, User, OrderItem, BonusTransaction, Chat, ChatMessage
 from core.config import settings
 from core.payments.freekassa import FreeKassaProvider
 from core.payments.paypalych import PaypalychProvider
@@ -147,6 +147,77 @@ async def notify_admins_about_purchase(
             logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
 
 
+async def _create_order_chat(order: Order, db: AsyncSession):
+    """
+    Создаёт чат для заказа (если ещё не существует) и добавляет системное приветственное сообщение.
+    Уведомляет подключённых админов через Socket.IO.
+    """
+    try:
+        from apps.socket.server import sio
+
+        # Проверяем, не создан ли уже чат
+        existing = await db.execute(select(Chat).where(Chat.id == order.id))
+        # Ищем по order_id
+        existing = await db.execute(select(Chat).where(Chat.order_id == order.id))
+        if existing.scalar_one_or_none():
+            return
+
+        items_lines = "\n".join(
+            f"  • {item.product_title} × {item.quantity} — {float(item.price * item.quantity):,.0f} ₽"
+            for item in order.items
+        )
+
+        # Собираем данные аккаунта если есть
+        account_section = ""
+        if order.account_email:
+            account_section = f"\n\n🎮 Данные аккаунта:\n  {order.account_type}: {order.account_email}"
+            if order.account_name:
+                account_section += f"\n  Имя: {order.account_name}"
+
+        system_text = (
+            f"🎉 Заказ #{order.id} подтверждён!\n\n"
+            f"📦 Товары:\n{items_lines}\n\n"
+            f"💰 Итого: {float(order.final_amount):,.0f} ₽"
+            f"{account_section}\n\n"
+            f"Продавец скоро передаст вам товар. Если есть вопросы — пишите здесь."
+        )
+
+        chat = Chat(
+            order_id=order.id,
+            user_id=order.user_id,
+            status="open",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(chat)
+        await db.flush()  # получаем chat.id
+
+        msg = ChatMessage(
+            chat_id=chat.id,
+            sender_id=None,
+            sender_type="system",
+            content=system_text,
+            is_read=False,
+            created_at=datetime.utcnow(),
+        )
+        db.add(msg)
+        await db.commit()
+        await db.refresh(chat)
+
+        # Уведомляем всех подключённых админов
+        await sio.emit("new_chat", {
+            "id": chat.id,
+            "order_id": order.id,
+            "user_id": order.user_id,
+            "status": "open",
+            "created_at": chat.created_at.isoformat(),
+        }, room="admins")
+
+        logger.info(f"Chat #{chat.id} created for order #{order.id}")
+    except Exception as e:
+        logger.error(f"Failed to create chat for order #{order.id}: {e}")
+
+
 async def update_payment_status(
     payment: Payment,
     status: str,
@@ -222,6 +293,9 @@ async def update_payment_status(
                 if user:
                     user.total_spent += order.final_amount  # Добавляем к "всего потрачено"
                     user.total_orders += 1  # Увеличиваем счетчик заказов
+
+                # Автоматически создать чат для этого заказа
+                await _create_order_chat(order, db)
 
                 # Отправить уведомление админам о покупке
                 if user and order.items:

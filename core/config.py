@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = "change-me-in-production-32-chars"
 
     # Admin
-    OWNER_TG_IDS: str = ""  # CSV строка, например "123456,789012"
+    OWNER_TG_IDS: str = ""    # CSV строка, например "123456,789012"
+    OWNER_EMAILS: str = ""    # CSV строка, например "admin@shop.com,owner@shop.com"
 
     # API
     API_PUBLIC_URL: str = "http://localhost:8000"
@@ -64,9 +65,15 @@ class Settings(BaseSettings):
         """Парсинг OWNER_TG_IDS в список int"""
         if not self.OWNER_TG_IDS:
             return []
-        # Поддержка как запятых, так и точек с запятой в качестве разделителей
         ids_str = self.OWNER_TG_IDS.replace(";", ",")
         return [int(x.strip()) for x in ids_str.split(",") if x.strip()]
+
+    @property
+    def owner_emails(self) -> List[str]:
+        """Парсинг OWNER_EMAILS в список строк (нижний регистр)"""
+        if not self.OWNER_EMAILS:
+            return []
+        return [e.strip().lower() for e in self.OWNER_EMAILS.replace(";", ",").split(",") if e.strip()]
 
 
 # Глобальный инстанс настроек
