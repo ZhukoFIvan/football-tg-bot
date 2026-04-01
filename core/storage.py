@@ -15,8 +15,8 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # Поддерживаемые форматы изображений
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
 
-# Максимальный размер файла (5MB)
-MAX_FILE_SIZE = 5 * 1024 * 1024
+# Максимальный размер файла (15MB)
+MAX_FILE_SIZE = 15 * 1024 * 1024
 
 
 async def save_upload_file(file: UploadFile, subfolder: str = "") -> str:

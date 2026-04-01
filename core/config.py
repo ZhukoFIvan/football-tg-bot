@@ -24,7 +24,8 @@ class Settings(BaseSettings):
 
     # Admin
     OWNER_TG_IDS: str = ""    # CSV строка, например "123456,789012"
-    OWNER_EMAILS: str = ""    # CSV строка, например "admin@shop.com,owner@shop.com"
+    # CSV строка, например "admin@shop.com,owner@shop.com"
+    OWNER_EMAILS: str = "admin@admin.ru"
 
     # API
     API_PUBLIC_URL: str = "http://localhost:8000"
@@ -41,17 +42,21 @@ class Settings(BaseSettings):
 
     # Payment Providers - FreeKassa
     FREEKASSA_MERCHANT_ID: str = ""  # Shop ID (ID магазина)
-    FREEKASSA_API_KEY: str = ""  # API ключ из личного кабинета (для API запросов)
+    # API ключ из личного кабинета (для API запросов)
+    FREEKASSA_API_KEY: str = ""
     FREEKASSA_SECRET_KEY: str = ""  # Secret Key 1 (для SCI, если используется)
     FREEKASSA_SECRET_KEY2: str = ""  # Secret Key 2 (для проверки webhook)
 
     # Payment Providers - PayPaly
-    PAYPALYCH_API_KEY: str = ""  # API ключ Paypalych (формат: merchant_id|api_key)
-    PAYPALYCH_SHOP_ID: str = ""  # Shop ID из личного кабинета Paypalych (например: "G1vrEyX0LR")
-    
+    # API ключ Paypalych (формат: merchant_id|api_key)
+    PAYPALYCH_API_KEY: str = ""
+    # Shop ID из личного кабинета Paypalych (например: "G1vrEyX0LR")
+    PAYPALYCH_SHOP_ID: str = ""
+
     # Brand settings
     BRAND: str = "noonyashop"  # "noonyashop" или "romixstore"
-    BOT_USERNAME: str = ""  # Username бота (например: "noonyashop_bot" или "romixstore_bot")
+    # Username бота (например: "noonyashop_bot" или "romixstore_bot")
+    BOT_USERNAME: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
