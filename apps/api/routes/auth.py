@@ -143,11 +143,13 @@ async def telegram_auth(
     user = result.scalar_one_or_none()
 
     if not user:
+        # Создаем нового пользователя (пришёл через сайт/браузер)
         user = User(
             telegram_id=telegram_id,
             username=user_data.get("username"),
             first_name=user_data.get("first_name"),
             last_name=user_data.get("last_name"),
+            source="browser",
         )
         db.add(user)
         await db.commit()

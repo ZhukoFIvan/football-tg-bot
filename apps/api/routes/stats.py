@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from core.db.session import get_db
-from core.db.models import User, Order, Product, Section, Category, Payment
+from core.db.models import User, Order, OrderItem, Product, Section, Category, Payment
 from core.dependencies import get_admin_user
 
 router = APIRouter()
@@ -39,6 +39,14 @@ class UserStats(BaseModel):
     new_users_this_month: int
     banned_users: int
     admin_users: int
+    # Пользователи из Telegram (бот)
+    telegram_users_total: int
+    telegram_users_this_week: int
+    telegram_users_this_month: int
+    # Пользователи из браузера (сайт)
+    browser_users_total: int
+    browser_users_this_week: int
+    browser_users_this_month: int
 
 
 class OrderStats(BaseModel):
@@ -149,7 +157,7 @@ async def get_user_stats(
     # Всего пользователей
     total_users = await db.scalar(select(func.count(User.id)))
 
-    # Новые пользователи
+    # Новые пользователи (все источники)
     new_users_today = await db.scalar(
         select(func.count(User.id)).where(User.created_at >= today_start)
     )
@@ -170,13 +178,49 @@ async def get_user_stats(
         select(func.count(User.id)).where(User.is_admin == True)
     )
 
+    # Пользователи из Telegram (бот)
+    telegram_users_total = await db.scalar(
+        select(func.count(User.id)).where(User.source == "telegram")
+    )
+    telegram_users_this_week = await db.scalar(
+        select(func.count(User.id)).where(
+            and_(User.source == "telegram", User.created_at >= week_start)
+        )
+    )
+    telegram_users_this_month = await db.scalar(
+        select(func.count(User.id)).where(
+            and_(User.source == "telegram", User.created_at >= month_start)
+        )
+    )
+
+    # Пользователи из браузера (сайт)
+    browser_users_total = await db.scalar(
+        select(func.count(User.id)).where(User.source == "browser")
+    )
+    browser_users_this_week = await db.scalar(
+        select(func.count(User.id)).where(
+            and_(User.source == "browser", User.created_at >= week_start)
+        )
+    )
+    browser_users_this_month = await db.scalar(
+        select(func.count(User.id)).where(
+            and_(User.source == "browser", User.created_at >= month_start)
+        )
+    )
+
     return UserStats(
         total_users=total_users or 0,
         new_users_today=new_users_today or 0,
         new_users_this_week=new_users_this_week or 0,
         new_users_this_month=new_users_this_month or 0,
         banned_users=banned_users or 0,
-        admin_users=admin_users or 0
+        admin_users=admin_users or 0,
+        telegram_users_total=telegram_users_total or 0,
+        telegram_users_this_week=telegram_users_this_week or 0,
+        telegram_users_this_month=telegram_users_this_month or 0,
+        browser_users_total=browser_users_total or 0,
+        browser_users_this_week=browser_users_this_week or 0,
+        browser_users_this_month=browser_users_this_month or 0,
     )
 
 
@@ -340,20 +384,22 @@ async def get_top_products(
 ):
     """Получить топ товаров по продажам"""
 
-    # Запрос с группировкой по товарам
+    # Запрос с группировкой по товарам (через OrderItem)
     query = select(
         Product.id,
         Product.title,
-        func.count(Order.id).label("orders_count"),
+        func.count(distinct(Order.id)).label("orders_count"),
         func.sum(Order.final_amount).label("revenue")
     ).join(
-        Order, Order.product_id == Product.id
+        OrderItem, OrderItem.product_id == Product.id
+    ).join(
+        Order, Order.id == OrderItem.order_id
     ).where(
         Order.status.in_(["paid", "completed"])
     ).group_by(
         Product.id, Product.title
     ).order_by(
-        func.count(Order.id).desc()
+        func.count(distinct(Order.id)).desc()
     ).limit(limit)
 
     result = await db.execute(query)

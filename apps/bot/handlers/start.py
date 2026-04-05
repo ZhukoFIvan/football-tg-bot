@@ -39,7 +39,8 @@ async def cmd_start(message: Message, bot: Bot):
                         username=message.from_user.username,
                         first_name=message.from_user.first_name or "",
                         last_name=message.from_user.last_name or "",
-                        is_admin=message.from_user.id in settings.owner_ids
+                        is_admin=message.from_user.id in settings.owner_ids,
+                        source="telegram"
                     )
                     session.add(user)
                     await session.commit()
