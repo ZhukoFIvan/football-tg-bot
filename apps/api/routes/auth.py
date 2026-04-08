@@ -206,6 +206,7 @@ async def telegram_widget_auth(
             username=request.username,
             first_name=request.first_name,
             last_name=request.last_name,
+            source="browser",
         )
         db.add(user)
         await db.commit()
@@ -253,6 +254,7 @@ async def register(
         password_hash=hash_password(request.password),
         display_name=request.display_name,
         is_admin=email_lower in settings.owner_emails,
+        source="browser",
     )
     db.add(user)
     await db.commit()
