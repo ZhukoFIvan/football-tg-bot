@@ -355,6 +355,8 @@ class ChatMessage(Base):
                        nullable=True)   # NULL = системное сообщение
     sender_type = Column(String(10), nullable=False)  # user | admin | system
     content = Column(Text, nullable=False)
+    message_type = Column(String(10), default="text", nullable=False)  # text | image
+    media_url = Column(Text, nullable=True)
     is_read = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
