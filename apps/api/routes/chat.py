@@ -2,7 +2,7 @@
 REST API для чатов — список, история, смена статуса
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
@@ -13,6 +13,8 @@ from datetime import datetime
 from core.db.session import get_db
 from core.db.models import Chat, ChatMessage, Order, OrderItem, User
 from core.dependencies import get_current_user, get_admin_user
+from core.storage import save_upload_file
+from core.config import settings
 from apps.socket.server import sio
 
 router = APIRouter()
@@ -29,6 +31,8 @@ class MessageOut(BaseModel):
     sender_id: Optional[int]
     sender_type: str
     content: str
+    message_type: str = "text"
+    media_url: Optional[str] = None
     is_read: bool
     created_at: str
 
@@ -85,6 +89,20 @@ class ChatOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Утилиты
 # ---------------------------------------------------------------------------
+
+def _msg_to_dict_full(msg: ChatMessage) -> dict:
+    return {
+        "id": msg.id,
+        "chat_id": msg.chat_id,
+        "sender_id": msg.sender_id,
+        "sender_type": msg.sender_type,
+        "content": msg.content,
+        "message_type": msg.message_type or "text",
+        "media_url": f"{settings.API_PUBLIC_URL}{msg.media_url}" if msg.media_url and not msg.media_url.startswith("http") else msg.media_url,
+        "is_read": msg.is_read,
+        "created_at": msg.created_at.isoformat(),
+    }
+
 
 def _chat_to_dict(chat: Chat, current_user_id: int, is_admin: bool) -> dict:
     opposite = "admin" if not is_admin else "user"
@@ -248,3 +266,26 @@ async def close_chat(
                    room=f"chat_{chat_id}")
 
     return {"ok": True, "status": "closed"}
+
+
+@router.post("/{chat_id}/upload")
+async def upload_chat_media(
+    chat_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Загрузить медиафайл (изображение) для чата"""
+    result = await db.execute(select(Chat).where(Chat.id == chat_id))
+    chat = result.scalar_one_or_none()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if not current_user.is_admin and chat.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if chat.status == "closed":
+        raise HTTPException(status_code=400, detail="Chat is closed")
+
+    media_path = await save_upload_file(file, subfolder="chat")
+    return {"ok": True, "media_url": f"{settings.API_PUBLIC_URL}{media_path}"}

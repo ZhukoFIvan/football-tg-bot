@@ -47,12 +47,18 @@ _sessions: dict[str, dict] = {}
 # ---------------------------------------------------------------------------
 
 def _msg_to_dict(msg: ChatMessage) -> dict:
+    from core.config import settings
+    media_url = msg.media_url
+    if media_url and not media_url.startswith("http"):
+        media_url = f"{settings.API_PUBLIC_URL}{media_url}"
     return {
         "id": msg.id,
         "chat_id": msg.chat_id,
         "sender_id": msg.sender_id,
         "sender_type": msg.sender_type,
         "content": msg.content,
+        "message_type": msg.message_type or "text",
+        "media_url": media_url,
         "is_read": msg.is_read,
         "created_at": msg.created_at.isoformat(),
     }
@@ -166,7 +172,11 @@ async def send_message(sid: str, data: dict):
 
     chat_id = data.get("chat_id")
     content = (data.get("content") or "").strip()
-    if not chat_id or not content:
+    media_url = (data.get("media_url") or "").strip() or None
+    message_type = "image" if media_url else "text"
+
+    # Для текстового сообщения контент обязателен; для изображения — нет
+    if not chat_id or (not content and not media_url):
         return
 
     async with async_session_factory() as db:
@@ -186,7 +196,9 @@ async def send_message(sid: str, data: dict):
             chat_id=chat_id,
             sender_id=session["user_id"],
             sender_type=sender_type,
-            content=content,
+            content=content or "",
+            message_type=message_type,
+            media_url=media_url,
             is_read=False,
             created_at=datetime.utcnow(),
         )
