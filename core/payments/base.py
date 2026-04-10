@@ -19,7 +19,8 @@ class PaymentProvider(ABC):
         user_id: int,
         payment_method: str = "card",  # "card" для карты, "sbp" для СБП
         user_email: Optional[str] = None,
-        user_ip: Optional[str] = None
+        user_ip: Optional[str] = None,
+        checkout_source: str = "web",  # "web" | "telegram" — куда редиректить после оплаты
     ) -> Dict:
         """
         Создать платеж

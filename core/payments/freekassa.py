@@ -169,7 +169,8 @@ class FreeKassaProvider(PaymentProvider):
         user_id: int,
         payment_method: str = "card",  # "card" для карты, "sbp" для СБП
         user_email: Optional[str] = None,
-        user_ip: Optional[str] = None
+        user_ip: Optional[str] = None,
+        checkout_source: str = "web",
     ) -> Dict:
         """
         Создать платеж в FreeKassa через API
@@ -254,8 +255,15 @@ class FreeKassaProvider(PaymentProvider):
             # ВАЖНО: result_url - URL для webhook уведомлений от FreeKassa
             result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/freekassa"
             # Frontend страницы результатов (не API, а Next.js)
-            success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}&bot_username={bot_username}"
-            fail_url = f"{settings.FRONTEND_URL}/payments/failed?order_id={order_id}&bot_username={bot_username}"
+            src = checkout_source if checkout_source in ("web", "telegram") else "web"
+            success_url = (
+                f"{settings.FRONTEND_URL}/payments/success"
+                f"?order_id={order_id}&bot_username={bot_username}&source={src}"
+            )
+            fail_url = (
+                f"{settings.FRONTEND_URL}/payments/failed"
+                f"?order_id={order_id}&bot_username={bot_username}&source={src}"
+            )
             
             # Формируем данные для API запроса
             # Согласно документации: POST https://api.fk.life/v1/orders/create

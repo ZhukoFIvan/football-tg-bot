@@ -74,6 +74,8 @@ class CreatePaymentRequest(BaseModel):
     promo_code: str | None = None
     bonus_to_use: int = 0
     account_info: AccountInfo  # Данные игрового аккаунта (обязательно)
+    # Откуда оформлен заказ: сайт или Telegram Mini App (влияет на success/fail URL у провайдера)
+    checkout_source: str = "web"  # "web" | "telegram"
 
 
 class PaymentResponse(BaseModel):
@@ -361,6 +363,12 @@ async def create_payment(
             detail=f"Invalid payment method. Supported: card, sbp"
         )
 
+    if request.checkout_source not in ("web", "telegram"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid checkout_source. Supported: web, telegram",
+        )
+
     # Валидация данных аккаунта
     account_info = request.account_info
     if account_info.account_type not in ["EA", "Facebook", "Google"]:
@@ -626,7 +634,8 @@ async def create_payment(
         description=description,
         user_id=current_user.id,
         payment_method=request.payment_method,
-        user_ip=client_ip
+        user_ip=client_ip,
+        checkout_source=request.checkout_source,
     )
 
     # Сохранить платеж в БД

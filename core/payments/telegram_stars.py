@@ -23,7 +23,10 @@ class TelegramStarsProvider(PaymentProvider):
         currency: str,
         description: str,
         user_id: int,
-        payment_method: str = "card"  # Для Stars не используется, но для совместимости
+        payment_method: str = "card",  # Для Stars не используется, но для совместимости
+        user_email: Optional[str] = None,
+        user_ip: Optional[str] = None,
+        checkout_source: str = "web",
     ) -> Dict:
         """
         Создать invoice для оплаты через Telegram Stars

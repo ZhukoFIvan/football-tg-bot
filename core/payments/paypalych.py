@@ -80,7 +80,8 @@ class PaypalychProvider(PaymentProvider):
         user_id: int,
         payment_method: str = "sbp",
         user_email: Optional[str] = None,
-        user_ip: Optional[str] = None
+        user_ip: Optional[str] = None,
+        checkout_source: str = "web",
     ) -> Dict:
         """
         Создать платеж в PayPaly через /api/v1/bill/create
@@ -140,8 +141,16 @@ class PaypalychProvider(PaymentProvider):
                 result_url = f"{settings.API_PUBLIC_URL}/api/payments/webhook/paypalych"
                 
                 # Frontend страницы результатов (не API, а Next.js)
-                success_url = f"{settings.FRONTEND_URL}/payments/success?order_id={order_id}&bot_username={bot_username}"
-                fail_url = f"{settings.FRONTEND_URL}/payments/failed?order_id={order_id}&bot_username={bot_username}"
+                # source=telegram — оплата начата из Mini App (после редиректа из банка initData нет)
+                src = checkout_source if checkout_source in ("web", "telegram") else "web"
+                success_url = (
+                    f"{settings.FRONTEND_URL}/payments/success"
+                    f"?order_id={order_id}&bot_username={bot_username}&source={src}"
+                )
+                fail_url = (
+                    f"{settings.FRONTEND_URL}/payments/failed"
+                    f"?order_id={order_id}&bot_username={bot_username}&source={src}"
+                )
                 
                 data_form = aiohttp.FormData()
                 data_form.add_field("amount", str(float(amount)))
