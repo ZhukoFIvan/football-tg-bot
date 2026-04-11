@@ -1,6 +1,7 @@
 """
 Webhook эндпоинты для обработки платежных уведомлений
 """
+import html
 import logging
 import re
 from fastapi import APIRouter, Request, HTTPException, Depends
@@ -71,6 +72,13 @@ async def send_telegram_notification(
             f"Ошибка при отправке уведомления пользователю {telegram_id}: {e}")
 
 
+def _tg_html(s: str | None) -> str:
+    """Экранирование для Telegram HTML (данные пользователя/товара)."""
+    if s is None:
+        return ""
+    return html.escape(str(s), quote=False)
+
+
 async def notify_admins_about_purchase(
     user: User,
     order: Order,
@@ -92,11 +100,23 @@ async def notify_admins_about_purchase(
             "OWNER_TG_IDS не задан - уведомления админам не отправлены")
         return
 
-    # Формируем список товаров
-    items_text = "\n".join([
-        f"  • {item.product_title} x{item.quantity} = {float(item.price * item.quantity):,.2f} ₽"
-        for item in order_items
-    ])
+    # Формируем список товаров (безопасно к None и к символам в названии)
+    lines = []
+    for item in order_items:
+        try:
+            qty = int(item.quantity) if item.quantity is not None else 0
+            price = float(item.price) if item.price is not None else 0.0
+            line_total = price * qty
+            lines.append(
+                f"  • {_tg_html(item.product_title)} x{qty} = {line_total:,.2f} ₽"
+            )
+        except Exception as e:
+            logger.warning(
+                "notify_admins: пропуск строки товара из-за ошибки: %s item_id=%s",
+                e,
+                getattr(item, "id", None),
+            )
+    items_text = "\n".join(lines) if lines else "  • (нет позиций)"
 
     # Проверяем наличие данных аккаунта
     has_account_data = (
@@ -108,23 +128,26 @@ async def notify_admins_about_purchase(
     # Формируем секцию с данными аккаунта только если они есть
     account_section = ""
     if has_account_data:
-        password_line = f'   • Пароль: <code>{order.account_password}</code>\n' if order.account_password else ''
+        pwd = _tg_html(order.account_password) if order.account_password else ""
+        password_line = f'   • Пароль: <code>{pwd}</code>\n' if pwd else ''
         account_section = f"""
 🎮 <b>Данные аккаунта:</b>
-   • Тип: {order.account_type}
-   • Email/Phone: <code>{order.account_email}</code>
-   • Имя аккаунта: <code>{order.account_name}</code>
+   • Тип: {_tg_html(order.account_type)}
+   • Email/Phone: <code>{_tg_html(order.account_email)}</code>
+   • Имя аккаунта: <code>{_tg_html(order.account_name)}</code>
 {password_line}"""
 
+    uname = _tg_html(user.username) if user.username else "не указан"
+    fn = _tg_html(user.first_name) if user.first_name else ""
+    ln = _tg_html(user.last_name) if user.last_name else ""
     message = f"""
 🎉 <b>Новая покупка!</b>
 
 👤 <b>Пользователь:</b>
    • ID: <code>{user.id}</code>
    • Telegram ID: <code>{user.telegram_id}</code>
-   • Telegram User ID: @{user.telegram_id}
-   • Username: @{user.username if user.username else 'не указан'}
-   • Имя: {user.first_name} {user.last_name or ''}
+   • Username: @{uname}
+   • Имя: {fn} {ln}
 
 📦 <b>Заказ #{order.id}</b>
 {items_text}
@@ -235,6 +258,12 @@ async def update_payment_status(
     """
     # Не обновлять, если статус уже установлен (избежать дублирования)
     if payment.status == status:
+        logger.info(
+            "update_payment_status: пропуск (уже %s), payment_id=%s order_id=%s",
+            status,
+            getattr(payment, "id", None),
+            getattr(payment, "order_id", None),
+        )
         return
 
     payment.status = status
@@ -294,12 +323,22 @@ async def update_payment_status(
                     user.total_spent += order.final_amount  # Добавляем к "всего потрачено"
                     user.total_orders += 1  # Увеличиваем счетчик заказов
 
-                # Автоматически создать чат для этого заказа
-                await _create_order_chat(order, db)
+                # Уведомление админам — до commit внутри _create_order_chat; ошибка не должна ронять webhook
+                # (иначе провайдер шлёт повтор, payment уже success → ранний return → уведомление теряется навсегда)
+                if user:
+                    try:
+                        await notify_admins_about_purchase(
+                            user, order, list(order.items), payment
+                        )
+                    except Exception as e:
+                        logger.exception(
+                            "Уведомление админам о заказе #%s не отправлено: %s",
+                            order.id,
+                            e,
+                        )
 
-                # Отправить уведомление админам о покупке
-                if user and order.items:
-                    await notify_admins_about_purchase(user, order, order.items, payment)
+                # Автоматически создать чат для этого заказа (внутри — отдельный commit)
+                await _create_order_chat(order, db)
 
         elif status == "cancelled" or status == "failed":
             if order.status == "pending":

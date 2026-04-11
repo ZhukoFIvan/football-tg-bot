@@ -2,7 +2,7 @@
 Корзина пользователя
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -345,9 +345,10 @@ async def clear_cart(
 @router.post("/checkout", response_model=PaymentResponse)
 async def create_payment(
     request: CreatePaymentRequest,
+    raw_request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    http_request: Request = None
+    x_checkout_source: str | None = Header(None, alias="X-Checkout-Source"),
 ):
     """
     Создать платеж для корзины
@@ -368,6 +369,15 @@ async def create_payment(
             status_code=400,
             detail="Invalid checkout_source. Supported: web, telegram",
         )
+
+    # Тело + заголовок (фронт шлёт оба): если хоть один — telegram, редирект после оплаты ведёт в сценарий TG
+    hdr = (x_checkout_source or "").strip().lower()
+    header_src = hdr if hdr in ("web", "telegram") else None
+    checkout_source = (
+        "telegram"
+        if (request.checkout_source == "telegram" or header_src == "telegram")
+        else "web"
+    )
 
     # Валидация данных аккаунта
     account_info = request.account_info
@@ -616,15 +626,15 @@ async def create_payment(
 
     # Получаем IP клиента для FreeKassa
     client_ip = None
-    if http_request:
+    if raw_request:
         # Пробуем получить IP из заголовков (для прокси/балансировщиков)
-        client_ip = http_request.headers.get("X-Forwarded-For")
+        client_ip = raw_request.headers.get("X-Forwarded-For")
         if client_ip:
             client_ip = client_ip.split(",")[0].strip()
         if not client_ip:
-            client_ip = http_request.headers.get("X-Real-IP")
+            client_ip = raw_request.headers.get("X-Real-IP")
         if not client_ip:
-            client_ip = http_request.client.host if http_request.client else None
+            client_ip = raw_request.client.host if raw_request.client else None
     
     # Создать платеж
     payment_data = await provider.create_payment(
@@ -635,7 +645,7 @@ async def create_payment(
         user_id=current_user.id,
         payment_method=request.payment_method,
         user_ip=client_ip,
-        checkout_source=request.checkout_source,
+        checkout_source=checkout_source,
     )
 
     # Сохранить платеж в БД
