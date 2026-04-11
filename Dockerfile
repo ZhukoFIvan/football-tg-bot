@@ -24,5 +24,5 @@ RUN useradd -m -u 1000 appuser && \
     chmod -R 755 /app/uploads
 USER appuser
 
-# По умолчанию запускаем API (можно переопределить в docker-compose)
-CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# По умолчанию — тот же ASGI, что в docker-compose (Socket.IO + FastAPI)
+CMD ["uvicorn", "apps.api.main:combined_app", "--host", "0.0.0.0", "--port", "8000"]

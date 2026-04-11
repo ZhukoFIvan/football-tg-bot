@@ -17,7 +17,10 @@ from core.db.models import Payment, Order, User, OrderItem, BonusTransaction, Ch
 from core.config import settings
 from core.payments.freekassa import FreeKassaProvider
 from core.payments.paypalych import PaypalychProvider
+from aiohttp import ClientTimeout
 from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 
 router = APIRouter()
@@ -63,13 +66,25 @@ async def send_telegram_notification(
         message: Текст сообщения
         bot_token: Токен бота
     """
+    session = AiohttpSession(
+        timeout=ClientTimeout(total=90, connect=20, sock_read=75)
+    )
+    bot = Bot(
+        token=bot_token,
+        session=session,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     try:
-        bot = Bot(token=bot_token, parse_mode=ParseMode.HTML)
         await bot.send_message(chat_id=telegram_id, text=message)
-        await bot.session.close()
     except Exception as e:
         logger.error(
-            f"Ошибка при отправке уведомления пользователю {telegram_id}: {e}")
+            f"Ошибка при отправке уведомления пользователю {telegram_id}: {e}"
+        )
+    finally:
+        try:
+            await bot.session.close()
+        except Exception as e:
+            logger.warning("Не удалось закрыть session Telegram-бота: %s", e)
 
 
 def _tg_html(s: str | None) -> str:
@@ -245,16 +260,14 @@ async def update_payment_status(
     payment: Payment,
     status: str,
     db: AsyncSession,
-    paid_at: datetime | None = None
-):
+    paid_at: datetime | None = None,
+) -> bool:
     """
-    Обновить статус платежа и связанного заказа
+    Обновить статус платежа и связанного заказа.
 
-    Args:
-        payment: Объект платежа
-        status: Новый статус (success, failed, cancelled, refunded)
-        db: Сессия БД
-        paid_at: Дата оплаты (для успешных платежей)
+    Returns:
+        True — статус реально изменён и транзакция закоммичена;
+        False — уже был такой статус (дубликат webhook), коммит не нужен.
     """
     # Не обновлять, если статус уже установлен (избежать дублирования)
     if payment.status == status:
@@ -264,7 +277,7 @@ async def update_payment_status(
             getattr(payment, "id", None),
             getattr(payment, "order_id", None),
         )
-        return
+        return False
 
     payment.status = status
     payment.updated_at = datetime.utcnow()
@@ -354,6 +367,7 @@ async def update_payment_status(
                         item.product.stock_count += item.quantity
 
     await db.commit()
+    return True
 
 
 # ==================== WEBHOOK ENDPOINTS ====================
@@ -636,21 +650,26 @@ async def paypalych_webhook(
         if status.upper() == "SUCCESS":
             logger.info(
                 f"Payment SUCCESS for order {order_id}, updating status...")
-            await update_payment_status(payment, "success", db, paid_at=datetime.utcnow())
+            updated = await update_payment_status(
+                payment, "success", db, paid_at=datetime.utcnow()
+            )
             logger.info(
-                f"Payment status updated, bonus_earned: {payment.order.bonus_earned if payment.order else 'N/A'}")
+                "Payment status %s, bonus_earned: %s",
+                "updated" if updated else "unchanged (duplicate webhook)",
+                payment.order.bonus_earned if payment.order else "N/A",
+            )
 
-            # Отправить уведомление пользователю
-            user = payment.user
-            if user:
-                # Определяем бренд для текста поддержки
-                brand = settings.BRAND.lower() if hasattr(settings, 'BRAND') else "noonyashop"
-                if brand == "romixstore":
-                    support_text = "@romixstore_support"
-                else:
-                    support_text = "@noonyashop_support"
-                
-                message = f"""✅ <b>Платеж успешно выполнен!</b>
+            # Повторный postback: updated=False — не шлём пользователю второй раз (избегаем таймаутов и лишней нагрузки)
+            if updated:
+                user = payment.user
+                if user:
+                    brand = settings.BRAND.lower() if hasattr(settings, 'BRAND') else "noonyashop"
+                    if brand == "romixstore":
+                        support_text = "@romixstore_support"
+                    else:
+                        support_text = "@noonyashop_support"
+
+                    message = f"""✅ <b>Платеж успешно выполнен!</b>
 
 📦 Заказ #{order_id}
 💰 Сумма: {float(amount):,.2f} ₽
@@ -660,13 +679,12 @@ async def paypalych_webhook(
 
 Если возникли вопросы обращайтесь {support_text}
 """
-                await send_telegram_notification(user.telegram_id, message)
+                    await send_telegram_notification(user.telegram_id, message)
         elif status.upper() == "FAIL":
-            await update_payment_status(payment, "failed", db)
+            updated = await update_payment_status(payment, "failed", db)
 
-            # Отправить уведомление об ошибке
             user = payment.user
-            if user:
+            if updated and user:
                 message = f"""
 ❌ <b>Ошибка при оплате</b>
 
