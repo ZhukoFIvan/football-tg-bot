@@ -17,10 +17,7 @@ from core.db.models import Payment, Order, User, OrderItem, BonusTransaction, Ch
 from core.config import settings
 from core.payments.freekassa import FreeKassaProvider
 from core.payments.paypalych import PaypalychProvider
-from aiohttp import ClientTimeout
 from aiogram import Bot
-from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 
 router = APIRouter()
@@ -66,14 +63,8 @@ async def send_telegram_notification(
         message: Текст сообщения
         bot_token: Токен бота
     """
-    session = AiohttpSession(
-        timeout=ClientTimeout(total=90, connect=20, sock_read=75)
-    )
-    bot = Bot(
-        token=bot_token,
-        session=session,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    # Без aiogram.client.default / AiohttpSession — в части образов старый aiogram или другой layout пакета → 502 при импорте
+    bot = Bot(token=bot_token, parse_mode=ParseMode.HTML)
     try:
         await bot.send_message(chat_id=telegram_id, text=message)
     except Exception as e:
